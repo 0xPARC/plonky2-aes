@@ -1,0 +1,8 @@
+[package]
+name = "plonky2-aes"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[dev-dependencies]
