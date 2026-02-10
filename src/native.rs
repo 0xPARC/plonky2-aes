@@ -6,15 +6,17 @@
 //! written in the most rust idiomatic way, but simulating the behavior that we
 //! will do later inside the circuit.
 
+use std::array;
+
 use crate::constants::{RCON, SBOX};
 
-type State = [[u8; 4]; 4];
+pub(crate) type State = [[u8; 4]; 4];
 
 fn flatten_state(s: State) -> [u8; 16] {
     let mut r = [0u8; 16];
     for i in 0..4 {
         for j in 0..4 {
-            r[i * 4 + j] = s[i][j];
+            r[i * 4 + j] = s[j][i];
         }
     }
     r
@@ -22,12 +24,16 @@ fn flatten_state(s: State) -> [u8; 16] {
 
 /// encrypts an AES block (16 bytes). NR determines the number of rounds,
 /// where AES-128: NR=10, AES-196: NR=12, AES-256: NR=14.
-fn encrypt_block<const NR: usize>(input: &[u8; 16], w: &[[u8; 4]; 4 * (NR + 1)]) -> State {
+pub(crate) fn encrypt_block<const NR: usize>(
+    input: &[u8; 16],
+    w: &[[u8; 4]; 4 * (NR + 1)],
+) -> State {
     assert_eq!(4 * (NR + 1), w.len());
 
     let mut s: State = [[0; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
+            // TODO
             s[i][j] = input[i + 4 * j];
         }
     }
@@ -48,7 +54,7 @@ fn encrypt_block<const NR: usize>(input: &[u8; 16], w: &[[u8; 4]; 4 * (NR + 1)])
     s
 }
 
-fn sub_bytes(s: State) -> State {
+pub(crate) fn sub_bytes(s: State) -> State {
     let mut r = [[0u8; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
@@ -58,17 +64,11 @@ fn sub_bytes(s: State) -> State {
     r
 }
 
-fn shift_rows(s: State) -> State {
-    let mut r = [[0u8; 4]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            r[i][j] = s[i][(i + j) % 4];
-        }
-    }
-    r
+pub(crate) fn shift_rows<T: Copy>(s: [[T; 4]; 4]) -> [[T; 4]; 4] {
+    array::from_fn(|i| array::from_fn(|j| s[i][(i + j) % 4]))
 }
 
-fn mix_columns(s: State) -> State {
+pub(crate) fn mix_columns(s: State) -> State {
     let mut r = [[0u8; 4]; 4];
     for c in 0..4 {
         r[0][c] = gf_2_8_mul(0x02, s[0][c]) ^ gf_2_8_mul(0x03, s[1][c]) ^ s[2][c] ^ s[3][c];
@@ -109,13 +109,9 @@ fn add_round_key(s: State, key: &[[u8; 4]]) -> State {
     r
 }
 
-fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
+pub(crate) fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
     key: &[u8; NK * NB],
-) -> [[u8; 4]; 4 * (NR + 1)]
-where
-    [(); 4 * (NR + 1)]:,
-    [(); 4 * 4 * (NR + 1)]:,
-{
+) -> [[u8; 4]; 4 * (NR + 1)] {
     let mut w = [[0u8; 4]; 4 * (NR + 1)]; // expanded key
 
     for i in 0..NK {
@@ -135,10 +131,8 @@ where
     w
 }
 
-fn rot_word(w: [u8; 4]) -> [u8; 4] {
-    let mut r = [0u8; 4];
-    (r[0], r[1], r[2], r[3]) = (w[1], w[2], w[3], w[0]);
-    r
+pub(crate) fn rot_word<T: Copy>(w: [T; 4]) -> [T; 4] {
+    array::from_fn(|i| w[(i + 1) % 4])
 }
 fn sub_word(w: [u8; 4]) -> [u8; 4] {
     let mut r = [0u8; 4];
@@ -209,25 +203,96 @@ mod tests {
             0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37,
             0x07, 0x34,
         ];
-        let key = [
+        let key: [u8; 16] = [
             0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
             0x4f, 0x3c,
         ];
-        let expanded_key = key_expansion::<4, 4, 10>(&key);
-
-        let c = encrypt_block::<10>(&input, &expanded_key);
-
         let expected: [u8; 16] = [
-            0x39, 0x02, 0xdc, 0x19, 0x25, 0xdc, 0x11, 0x6a, 0x84, 0x09, 0x85, 0x0b, 0x1d, 0xfb,
-            0x97, 0x32,
+            0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb, 0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a,
+            0x0b, 0x32,
         ];
-
+        let expanded_key = key_expansion::<4, 4, 10>(&key);
+        let c = encrypt_block::<10>(&input, &expanded_key);
         assert_eq!(flatten_state(c), expected);
     }
 
+    use aes::{
+        cipher::{BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit, generic_array::GenericArray},
+        {Aes128, Aes192, Aes256},
+    };
+    use rand::RngExt;
     /// test with loop of random-values against a rust well-tested library
     #[test]
     fn test_encrypt_block_external_lib() {
-        // TODO random-values loop against a rust well-tested library
+        let mut rng = rand::rng();
+
+        // AES-128
+        {
+            const NK: usize = 4;
+            const NB: usize = 4;
+            const NR: usize = 10;
+
+            for _ in 0..10 {
+                let key: [u8; NK * NB] = array::from_fn(|_| rng.random());
+                let block: [u8; 16] = array::from_fn(|_| rng.random());
+                let block = GenericArray::from(block);
+                test_encrypt_block_external_lib_op::<NK, NB, NR, Aes128>(key, block);
+            }
+        }
+        // AES-192
+        {
+            const NK: usize = 6;
+            const NB: usize = 4;
+            const NR: usize = 12;
+
+            for _ in 0..10 {
+                let key: [u8; NK * NB] = array::from_fn(|_| rng.random());
+                let block: [u8; 16] = array::from_fn(|_| rng.random());
+                let block = GenericArray::from(block);
+                test_encrypt_block_external_lib_op::<NK, NB, NR, Aes192>(key, block);
+            }
+        }
+        // AES-256
+        {
+            const NK: usize = 8;
+            const NB: usize = 4;
+            const NR: usize = 14;
+
+            for _ in 0..10 {
+                let key: [u8; NK * NB] = array::from_fn(|_| rng.random());
+                let block: [u8; 16] = array::from_fn(|_| rng.random());
+                let block = GenericArray::from(block);
+                test_encrypt_block_external_lib_op::<NK, NB, NR, Aes256>(key, block);
+            }
+        }
+    }
+    fn test_encrypt_block_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>(
+        key_arr: [u8; NK * NB],
+        block: GenericArray<u8, C::BlockSize>,
+    ) where
+        C: BlockEncrypt + BlockDecrypt + BlockSizeUser + KeyInit,
+        [(); 4 * (NR + 1)]:,
+    {
+        let cipher = C::new_from_slice(&key_arr).unwrap();
+
+        let mut block_arr: [u8; 16] = [0; 16];
+        block_arr.clone_from_slice(block.as_slice());
+        let mut block = block.clone();
+        let block_copy = block.clone();
+
+        // encrypt block in-place
+        cipher.encrypt_block(&mut block);
+        let binding = block.clone();
+        let expected_cipher = binding.as_slice();
+
+        // and decrypt it back
+        cipher.decrypt_block(&mut block);
+        assert_eq!(block, block_copy);
+
+        // now use our native implementation
+        let expanded_key = key_expansion::<NK, NB, NR>(&key_arr);
+        let c = encrypt_block::<NR>(&block_arr, &expanded_key);
+        // check native implementation vs external lib
+        assert_eq!(flatten_state(c), expected_cipher);
     }
 }
