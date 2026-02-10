@@ -61,10 +61,10 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     ) -> StateTarget;
 
     /// KeyExpansion
-    fn key_expansion<const NK: usize, const NR: usize>(
+    fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; 4 * NK],
+        key: [ByteArrayTarget; NK * NB],
     ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)];
 
     /// GF(2^8) addition
@@ -164,10 +164,10 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         }))
     }
 
-    fn key_expansion<const NK: usize, const NR: usize>(
+    fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; 4 * NK],
+        key: [ByteArrayTarget; NK * NB],
     ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)] {
         let rcon: [ByteArrayTarget; 11] = array::from_fn(|i| {
             let rcon_bits = le_bits_from_byte(RCON[i]);
@@ -547,10 +547,10 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteArrayTarget; _] =
+        let key_target: [ByteArrayTarget; NK * NB] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
         let sbox_lut = sbox_lut(&mut builder);
-        let expanded_key_target = builder.key_expansion::<NK, NR>(sbox_lut, key_target);
+        let expanded_key_target = builder.key_expansion::<NK, NB, NR>(sbox_lut, key_target);
 
         println!(
             "key_expansion(NK:{}, NB:{}, NR:{}) num_gates: {}",
@@ -623,17 +623,18 @@ mod tests {
     where
         [(); 4 * (NR + 1)]:,
         [(); 4 * NK]:,
+        // [(); NK * NB]:,
     {
         // Circuit declaration
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteArrayTarget; 4 * NK] =
+        let key_target: [ByteArrayTarget; NK * NB] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
         let sbox_lut = sbox_lut(&mut builder);
         let mix_matrix = state_mix_matrix_bits(&mut builder);
         let expanded_key_target: [[ByteArrayTarget; 4]; 4 * (NR + 1)] =
-            builder.key_expansion::<NK, NR>(sbox_lut, key_target);
+            builder.key_expansion::<NK, NB, NR>(sbox_lut, key_target);
 
         let input_state_target = builder.add_virtual_state();
 
@@ -663,16 +664,6 @@ mod tests {
 
         let expanded_key: [[u8; 4]; 4 * (NR + 1)] = key_expansion::<NK, NB, NR>(&key);
         let native_ciphertext = encrypt_block::<NR>(&input_state, &expanded_key);
-
-        // AES-128:
-        // let expected_ciphertext: [[u8; 4]; 4] = [
-        //     [0x39, 0x02, 0xdc, 0x19],
-        //     [0x25, 0xdc, 0x11, 0x6a],
-        //     [0x84, 0x09, 0x85, 0x0b],
-        //     [0x1d, 0xfb, 0x97, 0x32],
-        // ];
-        // // sanity check
-        // assert_eq!(native_ciphertext, expected_ciphertext);
 
         let mut pw = PartialWitness::<F>::new();
 
