@@ -11,9 +11,9 @@ use plonky2::{
 };
 
 use crate::{
-    D,
     constants::{RCON, SBOX},
-    native::{State, rot_word, shift_rows},
+    native::{rot_word, shift_rows, State},
+    D,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -27,7 +27,7 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     fn add_virtual_state(&mut self) -> StateTarget;
 
     /// AES cipher as in spec.
-    fn aes_cipher<const NR: usize>(
+    fn encrypt_block<const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
         mix_matrix: [[ByteArrayTarget; 4]; 4],
@@ -61,10 +61,10 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     ) -> StateTarget;
 
     /// KeyExpansion
-    fn key_expansion<const NK: usize, const NR: usize>(
+    fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; 4 * NK],
+        key: [ByteArrayTarget; NK * NB],
     ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)];
 
     /// GF(2^8) addition
@@ -105,12 +105,12 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         }))
     }
 
-    fn aes_cipher<const NR: usize>(
+    fn encrypt_block<const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
-        mix_matrix: [[ByteArrayTarget; 4]; 4],
+        mix_matrix: [[ByteArrayTarget; 4]; 4], // constant mix_matrix
         s: StateTarget,
-        w: [[ByteArrayTarget; 4]; 4 * (NR + 1)],
+        w: [[ByteArrayTarget; 4]; 4 * (NR + 1)], // expanded key
     ) -> StateTarget {
         let mut s = s;
         s = self.state_add_round_key(&w[0..4], s);
@@ -164,10 +164,10 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         }))
     }
 
-    fn key_expansion<const NK: usize, const NR: usize>(
+    fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
         &mut self,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; 4 * NK],
+        key: [ByteArrayTarget; NK * NB],
     ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)] {
         let rcon: [ByteArrayTarget; 11] = array::from_fn(|i| {
             let rcon_bits = le_bits_from_byte(RCON[i]);
@@ -399,10 +399,10 @@ mod tests {
 
     use crate::{
         circuit::{
-            ByteArrayTarget, CircuitBuilderAESState, PartialWitnessAESState,
-            PartialWitnessByteArray, sbox_lut, state_mix_matrix_bits,
+            sbox_lut, state_mix_matrix_bits, ByteArrayTarget, CircuitBuilderAESState,
+            PartialWitnessAESState, PartialWitnessByteArray,
         },
-        native::{State, encrypt_block, key_expansion, mix_columns, sub_bytes},
+        native::{encrypt_block, key_expansion, mix_columns, sub_bytes, State},
     };
 
     use super::D;
@@ -418,8 +418,9 @@ mod tests {
         let out_state_target = builder.state_sub_bytes(sbox_lut, state_target);
 
         let data = builder.build::<PoseidonGoldilocksConfig>();
-        let mut rng = rand::rng();
 
+        // set values to circuit
+        let mut rng = rand::rng();
         let test_states: [State; 10] = array::from_fn(|_| array::from_fn(|_| rng.random()));
 
         test_states.into_iter().try_for_each(|s| {
@@ -445,8 +446,9 @@ mod tests {
         let out_state_target = builder.state_mix_columns(mix_matrix, state_target);
 
         let data = builder.build::<PoseidonGoldilocksConfig>();
-        let mut rng = rand::rng();
 
+        // set values to circuit
+        let mut rng = rand::rng();
         let test_states: [State; 10] = array::from_fn(|_| array::from_fn(|_| rng.random()));
 
         test_states.into_iter().try_for_each(|s| {
@@ -474,6 +476,7 @@ mod tests {
 
         let data = builder.build::<PoseidonGoldilocksConfig>();
 
+        // set values to circuit
         let test_values = [
             (0x57, 0x01, 0x57),
             (0x57, 0x02, 0xae),
@@ -485,7 +488,6 @@ mod tests {
             (0x57, 0x80, 0x38),
             (0x57, 0x13, 0xfe),
         ];
-
         test_values
             .into_iter()
             .map(|(a, b, c)| {
@@ -506,83 +508,21 @@ mod tests {
             })
     }
 
-    /// Analogous tests to `native::tests::test_key_expansion`.
     #[test]
-    fn test_key_expansion_128() -> Result<()> {
-        // Circuit declaration
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let key_target: [ByteArrayTarget; _] =
-            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
-        let sbox_lut = sbox_lut(&mut builder);
-        let expanded_key_target = builder.key_expansion::<4, 10>(sbox_lut, key_target);
-
-        let data = builder.build::<PoseidonGoldilocksConfig>();
-
+    fn test_key_expansion() -> Result<()> {
         // AES-128
         let key = [
             0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
             0x4f, 0x3c,
         ];
-        let w = key_expansion::</*Nk,Nb,Nr*/ 4, 4, 10>(&key);
-
-        let mut pw = PartialWitness::<F>::new();
-
-        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
-
-        std::iter::zip(expanded_key_target, w).try_for_each(|(t, v)| {
-            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))
-        })?;
-
-        let proof = data.prove(pw)?;
-        data.verify(proof)
-    }
-
-    #[test]
-    fn test_key_expansion_196() -> Result<()> {
-        // Circuit declaration
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let key_target: [ByteArrayTarget; _] =
-            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
-        let sbox_lut = sbox_lut(&mut builder);
-        let expanded_key_target = builder.key_expansion::<6, 12>(sbox_lut, key_target);
-
-        let data = builder.build::<PoseidonGoldilocksConfig>();
+        test_key_expansion_op::</*Nk,Nb,Nr*/ 4, 4, 10>(key)?;
 
         // AES-196
         let key = [
             0x8e, 0x73, 0xb0, 0xf7, 0xda, 0x0e, 0x64, 0x52, 0xc8, 0x10, 0xf3, 0x2b, 0x80, 0x90,
             0x79, 0xe5, 0x62, 0xf8, 0xea, 0xd2, 0x52, 0x2c, 0x6b, 0x7b,
         ];
-        let w = key_expansion::</*Nk,Nb,Nr*/ 6, 4, 12>(&key);
-
-        let mut pw = PartialWitness::<F>::new();
-
-        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
-
-        std::iter::zip(expanded_key_target, w).try_for_each(|(t, v)| {
-            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))
-        })?;
-
-        let proof = data.prove(pw)?;
-        data.verify(proof)
-    }
-
-    #[test]
-    fn test_key_expansion_256() -> Result<()> {
-        // Circuit declaration
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let key_target: [ByteArrayTarget; _] =
-            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
-        let sbox_lut = sbox_lut(&mut builder);
-        let expanded_key_target = builder.key_expansion::<8, 14>(sbox_lut, key_target);
-
-        let data = builder.build::<PoseidonGoldilocksConfig>();
+        test_key_expansion_op::</*Nk,Nb,Nr*/ 6, 4, 12>(key)?;
 
         // AES-256
         let key = [
@@ -590,7 +530,39 @@ mod tests {
             0x77, 0x81, 0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3,
             0x09, 0x14, 0xdf, 0xf4,
         ];
-        let w = key_expansion::</*Nk,Nb,Nr*/ 8, 4, 14>(&key);
+        test_key_expansion_op::</*Nk,Nb,Nr*/ 8, 4, 14>(key)?;
+
+        Ok(())
+    }
+
+    /// Analogous tests to `native::tests::test_key_expansion`.
+    fn test_key_expansion_op<const NK: usize, const NB: usize, const NR: usize>(
+        key: [u8; NK * NB],
+    ) -> Result<()>
+    where
+        [(); 4 * (NR + 1)]:,
+        [(); 4 * NK]:,
+    {
+        // Circuit declaration
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let key_target: [ByteArrayTarget; NK * NB] =
+            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
+        let sbox_lut = sbox_lut(&mut builder);
+        let expanded_key_target = builder.key_expansion::<NK, NB, NR>(sbox_lut, key_target);
+
+        println!(
+            "key_expansion(NK:{}, NB:{}, NR:{}) num_gates: {}",
+            NK,
+            NB,
+            NR,
+            builder.num_gates()
+        );
+        let data = builder.build::<PoseidonGoldilocksConfig>();
+
+        // set values to circuit
+        let w = key_expansion::<NK, NB, NR>(&key);
 
         let mut pw = PartialWitness::<F>::new();
 
@@ -604,68 +576,106 @@ mod tests {
         data.verify(proof)
     }
 
-    /// test against paper test vector (appendix B)
+    /// test against native version
     #[test]
     fn test_encrypt_block_test_vector() -> Result<()> {
+        // AES-128
+        let input_state: [u8; 16] = [
+            0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37,
+            0x07, 0x34,
+        ];
+        let key = [
+            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
+            0x4f, 0x3c,
+        ];
+        test_encrypt_block_test_vector_op::<4, 4, 10>(input_state, key)?;
+
+        // AES-196
+        let input_state: [u8; 16] = [
+            0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37,
+            0x07, 0x34,
+        ];
+        let key = [
+            0x8e, 0x73, 0xb0, 0xf7, 0xda, 0x0e, 0x64, 0x52, 0xc8, 0x10, 0xf3, 0x2b, 0x80, 0x90,
+            0x79, 0xe5, 0x62, 0xf8, 0xea, 0xd2, 0x52, 0x2c, 0x6b, 0x7b,
+        ];
+        test_encrypt_block_test_vector_op::<6, 4, 12>(input_state, key)?;
+
+        // AES-256
+        let input_state: [u8; 16] = [
+            0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37,
+            0x07, 0x34,
+        ];
+        let key = [
+            0x60, 0x3d, 0xeb, 0x10, 0x15, 0xca, 0x71, 0xbe, 0x2b, 0x73, 0xae, 0xf0, 0x85, 0x7d,
+            0x77, 0x81, 0x1f, 0x35, 0x2c, 0x07, 0x3b, 0x61, 0x08, 0xd7, 0x2d, 0x98, 0x10, 0xa3,
+            0x09, 0x14, 0xdf, 0xf4,
+        ];
+        test_encrypt_block_test_vector_op::<8, 4, 14>(input_state, key)?;
+
+        Ok(())
+    }
+
+    fn test_encrypt_block_test_vector_op<const NK: usize, const NB: usize, const NR: usize>(
+        input_state: [u8; 16],
+        key: [u8; NK * NB],
+    ) -> Result<()>
+    where
+        [(); 4 * (NR + 1)]:,
+        [(); 4 * NK]:,
+        // [(); NK * NB]:,
+    {
         // Circuit declaration
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteArrayTarget; _] =
+        let key_target: [ByteArrayTarget; NK * NB] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
         let sbox_lut = sbox_lut(&mut builder);
         let mix_matrix = state_mix_matrix_bits(&mut builder);
-        let expanded_key_target = builder.key_expansion::<4, 10>(sbox_lut, key_target);
+        let expanded_key_target: [[ByteArrayTarget; 4]; 4 * (NR + 1)] =
+            builder.key_expansion::<NK, NB, NR>(sbox_lut, key_target);
 
         let input_state_target = builder.add_virtual_state();
 
-        let output = builder.aes_cipher(
+        let output = builder.encrypt_block(
             sbox_lut,
             mix_matrix,
             input_state_target,
             expanded_key_target,
         );
 
+        println!(
+            "encrypt_block (NK:{}, NB:{}, NR:{}) num_gates: {}",
+            NK,
+            NB,
+            NR,
+            builder.num_gates()
+        );
         let data = builder.build::<PoseidonGoldilocksConfig>();
 
-        let input_state: [[u8; _]; _] = [
-            [0x32, 0x43, 0xf6, 0xa8],
-            [0x88, 0x5a, 0x30, 0x8d],
-            [0x31, 0x31, 0x98, 0xa2],
-            [0xe0, 0x37, 0x07, 0x34],
-        ];
+        // set values to circuit
+        let mut input_state_matrix: State = [[0; 4]; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                input_state_matrix[i][j] = input_state[i + 4 * j];
+            }
+        }
 
-        let key = [
-            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
-            0x4f, 0x3c,
-        ];
-
-        let expanded_key = key_expansion::<4, 4, 10>(&key);
-
-        let expected_result: [[u8; _]; _] = [
-            [0x39, 0x02, 0xdc, 0x19],
-            [0x25, 0xdc, 0x11, 0x6a],
-            [0x84, 0x09, 0x85, 0x0b],
-            [0x1d, 0xfb, 0x97, 0x32],
-        ];
-
-        // TODO
-        let expected_result = encrypt_block::<10>(
-            &array::from_fn(|i| input_state[i % 4][i / 4]),
-            &expanded_key,
-        );
+        let expanded_key: [[u8; 4]; 4 * (NR + 1)] = key_expansion::<NK, NB, NR>(&key);
+        let native_ciphertext = encrypt_block::<NR>(&input_state, &expanded_key);
 
         let mut pw = PartialWitness::<F>::new();
 
         std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
 
-        pw.set_target_state(input_state_target, input_state)?;
+        pw.set_target_state(input_state_target, input_state_matrix)?;
 
         std::iter::zip(expanded_key_target, expanded_key).try_for_each(|(t, v)| {
             std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))
         })?;
 
-        std::iter::zip(output.0, expected_result).try_for_each(|(o, e)| {
+        std::iter::zip(output.0, native_ciphertext).try_for_each(|(o, e)| {
             std::iter::zip(o, e).try_for_each(|(o, e)| pw.set_byte_array_target(o, e))
         })?;
 
