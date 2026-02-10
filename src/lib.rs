@@ -3,5 +3,9 @@
 #![feature(generic_const_exprs)]
 #![allow(dead_code)] // TMP
 
+mod circuit;
 mod constants;
 mod native;
+
+/// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
+pub const D: usize = 2;

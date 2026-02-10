@@ -6,14 +6,17 @@
 //! written in the most rust idiomatic way, but simulating the behavior that we
 //! will do later inside the circuit.
 
+use std::array;
+
 use crate::constants::{RCON, SBOX};
 
-type State = [[u8; 4]; 4];
+pub(crate) type State = [[u8; 4]; 4];
 
 fn flatten_state(s: State) -> [u8; 16] {
     let mut r = [0u8; 16];
     for i in 0..4 {
         for j in 0..4 {
+            // TODO
             r[i * 4 + j] = s[i][j];
         }
     }
@@ -22,12 +25,16 @@ fn flatten_state(s: State) -> [u8; 16] {
 
 /// encrypts an AES block (16 bytes). NR determines the number of rounds,
 /// where AES-128: NR=10, AES-196: NR=12, AES-256: NR=14.
-fn encrypt_block<const NR: usize>(input: &[u8; 16], w: &[[u8; 4]; 4 * (NR + 1)]) -> State {
+pub(crate) fn encrypt_block<const NR: usize>(
+    input: &[u8; 16],
+    w: &[[u8; 4]; 4 * (NR + 1)],
+) -> State {
     assert_eq!(4 * (NR + 1), w.len());
 
     let mut s: State = [[0; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
+            // TODO
             s[i][j] = input[i + 4 * j];
         }
     }
@@ -48,7 +55,7 @@ fn encrypt_block<const NR: usize>(input: &[u8; 16], w: &[[u8; 4]; 4 * (NR + 1)])
     s
 }
 
-fn sub_bytes(s: State) -> State {
+pub(crate) fn sub_bytes(s: State) -> State {
     let mut r = [[0u8; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
@@ -58,17 +65,11 @@ fn sub_bytes(s: State) -> State {
     r
 }
 
-fn shift_rows(s: State) -> State {
-    let mut r = [[0u8; 4]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            r[i][j] = s[i][(i + j) % 4];
-        }
-    }
-    r
+pub(crate) fn shift_rows<T: Copy>(s: [[T; 4]; 4]) -> [[T; 4]; 4] {
+    array::from_fn(|i| array::from_fn(|j| s[i][(i + j) % 4]))
 }
 
-fn mix_columns(s: State) -> State {
+pub(crate) fn mix_columns(s: State) -> State {
     let mut r = [[0u8; 4]; 4];
     for c in 0..4 {
         r[0][c] = gf_2_8_mul(0x02, s[0][c]) ^ gf_2_8_mul(0x03, s[1][c]) ^ s[2][c] ^ s[3][c];
@@ -109,7 +110,7 @@ fn add_round_key(s: State, key: &[[u8; 4]]) -> State {
     r
 }
 
-fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
+pub(crate) fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
     key: &[u8; NK * NB],
 ) -> [[u8; 4]; 4 * (NR + 1)]
 where
@@ -135,10 +136,8 @@ where
     w
 }
 
-fn rot_word(w: [u8; 4]) -> [u8; 4] {
-    let mut r = [0u8; 4];
-    (r[0], r[1], r[2], r[3]) = (w[1], w[2], w[3], w[0]);
-    r
+pub(crate) fn rot_word<T: Copy>(w: [T; 4]) -> [T; 4] {
+    array::from_fn(|i| w[(i + 1) % 4])
 }
 fn sub_word(w: [u8; 4]) -> [u8; 4] {
     let mut r = [0u8; 4];
