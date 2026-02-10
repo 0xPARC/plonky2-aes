@@ -115,7 +115,6 @@ pub(crate) fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
 ) -> [[u8; 4]; 4 * (NR + 1)]
 where
     [(); 4 * (NR + 1)]:,
-    [(); 4 * 4 * (NR + 1)]:,
 {
     let mut w = [[0u8; 4]; 4 * (NR + 1)]; // expanded key
 
