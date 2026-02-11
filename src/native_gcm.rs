@@ -40,12 +40,12 @@ where
     };
 
     // 3. C=GCTR()
-    let c = gctr(&inc32(j0), &pt);
+    let c = gctr(expanded_key, &inc32(j0), &pt);
 
     // 4. u, v
     // let u = (16 - ceil(c.len() % 16)) % 16 // TODO WIP
-    let u: usize = 16 * (c.len() as f64 / 16_f64).ceil() as usize - c.len();
-    let v: usize = 16 * (a.len() as f64 / 16_f64).ceil() as usize - a.len();
+    let u: usize = 128 * ((c.len() * 8) as f64 / 128_f64).ceil() as usize - c.len() * 8;
+    let v: usize = 128 * ((a.len() * 8) as f64 / 128_f64).ceil() as usize - a.len() * 8;
 
     // 5. S = GHASH()
     let a_len: [u8; 8] = (a.len() * 8).to_be_bytes();
@@ -62,14 +62,46 @@ where
     let s = ghash(h, ghash_input);
 
     // 6. T=MSB(GCTR()))
-    let t = msb_t(TAG_LEN, &gctr(&j0, &s));
+    let t = msb_t(TAG_LEN, &gctr(expanded_key, &j0, &s));
 
     (c, t)
 }
 
-/// Section 6.5, Algorithm 3
-fn gctr(icb: &[u8; 16], x: &[u8]) -> Vec<u8> {
-    todo!()
+/// GCM-Ctr, Section 6.5, Algorithm 3
+fn gctr<const NR: usize>(key: [[u8; 4]; 4 * (NR + 1)], icb: &[u8; 16], x: &[u8]) -> Vec<u8> {
+    if x.is_empty() {
+        return x.to_vec();
+    }
+
+    let n = ((x.len() * 8) as f64 / 128_f64).ceil() as usize;
+
+    let mut y = vec![];
+    let mut cb_i = icb.clone();
+    for (i, x_i_raw) in x.chunks(16).enumerate() {
+        // 5.
+        if i > 1 {
+            cb_i = inc32(cb_i);
+        }
+
+        let l = x_i_raw.len().min(16);
+        let mut x_i = [0u8; 16];
+        x_i[..l].copy_from_slice(x_i_raw);
+
+        let ciph_cb_i = flatten_state(encrypt_block::<NR>(&cb_i, &key));
+
+        let y_i = if i < n {
+            xor_blocks(x_i, ciph_cb_i)
+        } else {
+            // last chunk, might be smaller than 16 bytes
+            let msb_res = msb_t(x_i.len(), ciph_cb_i.as_slice());
+            let l = msb_res.len().min(16);
+            let mut m = [0u8; 16];
+            m[..l].copy_from_slice(&msb_res);
+            xor_blocks(x_i, m)
+        };
+        y.push(y_i);
+    }
+    y.concat()
 }
 
 /// Section 6.4, Algorithm 2
@@ -174,28 +206,53 @@ mod tests {
         Aes128Gcm, Nonce,
     };
 
-    /// test checking against NIST test vector
     #[test]
     fn test_aes_gcm_encrypt_nist_vector() {
-        // https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_GCM.pdf
+        // https://csrc.nist.gov/Projects/Cryptographic-Algorithm-Validation-Program/CAVP-TESTING-BLOCK-CIPHER-MODES
+
+        // test vector at line 7
         let key: [u8; 16] = [
-            0xFE, 0xFF, 0xE9, 0x92, 0x86, 0x65, 0x73, 0x1C, 0x6D, 0x6A, 0x8F, 0x94, 0x67, 0x30,
-            0x83, 0x08,
+            0xcf, 0x06, 0x3a, 0x34, 0xd4, 0xa9, 0xa7, 0x6c, 0x2c, 0x86, 0x78, 0x7d, 0x3f, 0x96,
+            0xdb, 0x71,
         ];
         let nonce: [u8; 12] = [
-            0xCA, 0xFE, 0xBA, 0xBE, 0xFA, 0xCE, 0xDB, 0xAD, 0xDE, 0xCA, 0xF8, 0x88,
+            0x11, 0x3b, 0x97, 0x85, 0x97, 0x18, 0x64, 0xc8, 0x3b, 0x01, 0xc7, 0x87,
+        ];
+        let plaintext = [];
+        let _aad: &[u8] = &[];
+        let expected_ciphertext: &[u8] = &[];
+        let expected_tag: &[u8] = &[
+            0x72, 0xac, 0x84, 0x93, 0xe3, 0xa5, 0x22, 0x8b, 0x5d, 0x13, 0x0a, 0x69, 0xd2, 0x51,
+            0x0e, 0x42,
+        ];
+        let (c, tag) = encrypt::<4, 4, 10>(&key, &nonce, &plaintext);
+        assert_eq!(c, expected_ciphertext);
+        assert_eq!(tag, expected_tag);
+
+        // test vector at line 4417
+        let key: [u8; 16] = [
+            0xe9, 0x8b, 0x72, 0xa9, 0x88, 0x1a, 0x84, 0xca, 0x6b, 0x76, 0xe0, 0xf4, 0x3e, 0x68,
+            0x64, 0x7a,
+        ];
+        let nonce: [u8; 12] = [
+            0x8b, 0x23, 0x29, 0x9f, 0xde, 0x17, 0x40, 0x53, 0xf3, 0xd6, 0x52, 0xba,
         ];
         let plaintext = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00,
+            0x28, 0x28, 0x6a, 0x32, 0x12, 0x93, 0x25, 0x3c, 0x3e, 0x0a, 0xa2, 0x70, 0x4a, 0x27,
+            0x80, 0x32,
         ];
-        let aad: &[u8] = &[];
+        let _aad: &[u8] = &[];
         let expected_ciphertext: &[u8] = &[
-            0x32, 0x47, 0x18, 0x4B, 0x3C, 0x4F, 0x69, 0xA4, 0x4D, 0xBC, 0xD2, 0x28, 0x87, 0xBB,
-            0xB4, 0x18,
+            0x5a, 0x3c, 0x1c, 0xf1, 0x98, 0x5d, 0xbb, 0x8b, 0xed, 0x81, 0x80, 0x36, 0xfd, 0xd5,
+            0xab, 0x42,
         ];
-
-        todo!();
+        let expected_tag: &[u8] = &[
+            0x23, 0xc7, 0xab, 0x0f, 0x95, 0x2b, 0x70, 0x91, 0xcd, 0x32, 0x48, 0x35, 0x04, 0x3b,
+            0x5e, 0xb5,
+        ];
+        let (c, tag) = encrypt::<4, 4, 10>(&key, &nonce, &plaintext);
+        assert_eq!(c, expected_ciphertext);
+        assert_eq!(tag, expected_tag);
     }
 
     /// test checking against external aes-gcm lib
@@ -203,16 +260,19 @@ mod tests {
     fn test_with_external_lib() -> anyhow::Result<()> {
         let key: &[u8; 16] = &[42; 16];
         let nonce: &[u8; 12] = &[111; 12];
-        let pt = b"plaintext test message";
+        let pt: &[u8] = &[42u8; 16];
 
-        let key: &Key<Aes128Gcm> = key.into();
-        let cipher = Aes128Gcm::new(&key);
-        let nonce = Nonce::from_slice(nonce);
+        let key_ext: &Key<Aes128Gcm> = key.into();
+        let nonce_ext = Nonce::from_slice(nonce);
+        let cipher = Aes128Gcm::new(&key_ext);
 
-        let ciphertext = cipher.encrypt(&nonce, pt.as_ref()).unwrap();
+        let ciphertext = cipher.encrypt(&nonce_ext, pt.as_ref()).unwrap();
 
-        let plaintext = cipher.decrypt(&nonce, ciphertext.as_ref()).unwrap();
-        assert_eq!(&plaintext, pt);
+        let plaintext = cipher.decrypt(&nonce_ext, ciphertext.as_ref()).unwrap();
+        assert_eq!(plaintext, pt);
+
+        let (c, t) = encrypt::<4, 4, 10>(key, nonce, &pt);
+        assert_eq!([c, t].concat(), ciphertext);
         Ok(())
     }
 }
