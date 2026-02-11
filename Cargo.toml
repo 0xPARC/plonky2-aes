@@ -10,3 +10,4 @@ anyhow = "1.0.56"
 [dev-dependencies]
 rand = "0.10.0"
 aes = "0.8.4"
+aes-gcm = "0.10.3"

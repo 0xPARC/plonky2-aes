@@ -1,3 +1,5 @@
+//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+
 use std::{array, sync::Arc};
 
 use plonky2::{
@@ -12,7 +14,7 @@ use plonky2::{
 
 use crate::{
     constants::{RCON, SBOX},
-    native::{rot_word, shift_rows, State},
+    native_aes::{rot_word, shift_rows, State},
     D,
 };
 
@@ -397,13 +399,11 @@ mod tests {
     };
     use rand::RngExt;
 
-    use crate::{
-        circuit::{
-            sbox_lut, state_mix_matrix_bits, ByteArrayTarget, CircuitBuilderAESState,
-            PartialWitnessAESState, PartialWitnessByteArray,
-        },
-        native::{encrypt_block, key_expansion, mix_columns, sub_bytes, State},
+    use super::{
+        sbox_lut, state_mix_matrix_bits, ByteArrayTarget, CircuitBuilderAESState,
+        PartialWitnessAESState, PartialWitnessByteArray,
     };
+    use crate::native_aes::{encrypt_block, key_expansion, mix_columns, sub_bytes, State};
 
     use super::D;
 
@@ -535,7 +535,7 @@ mod tests {
         Ok(())
     }
 
-    /// Analogous tests to `native::tests::test_key_expansion`.
+    /// Analogous tests to `native_aes::tests::test_key_expansion`.
     fn test_key_expansion_op<const NK: usize, const NB: usize, const NR: usize>(
         key: [u8; NK * NB],
     ) -> Result<()>
