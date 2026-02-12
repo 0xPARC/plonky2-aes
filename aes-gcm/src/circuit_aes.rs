@@ -13,9 +13,9 @@ use plonky2::{
 };
 
 use crate::{
-    D,
     constants::{RCON, SBOX},
-    native_aes::{State, rot_word, shift_rows},
+    native_aes::{rot_word, shift_rows, State},
+    D,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -75,22 +75,22 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     /// GF(2^8) addition actinb on bit arrays
     fn gf_2_8_add_bits(
         &mut self,
-        x_bits: [BoolTarget; 8],
-        y_bits: [BoolTarget; 8],
+        x_bits: ByteArrayTarget,
+        y_bits: ByteArrayTarget,
     ) -> [BoolTarget; 8];
 
     /// GF(2^8) multiplication
     fn gf_2_8_mul(&mut self, x: Target, y: Target) -> Target;
 
     /// GF(2^8) multiplication acting on bit arrays
-    fn gf_2_8_mul_bits(&mut self, x: [BoolTarget; 8], y: [BoolTarget; 8]) -> [BoolTarget; 8];
+    fn gf_2_8_mul_bits(&mut self, x: ByteArrayTarget, y: ByteArrayTarget) -> ByteArrayTarget;
 
     /// Bytearray inner product.
     fn bytearray_ip_bits<const N: usize>(
         &mut self,
-        x: [[BoolTarget; 8]; N],
-        y: [[BoolTarget; 8]; N],
-    ) -> [BoolTarget; 8];
+        x: [ByteArrayTarget; N],
+        y: [ByteArrayTarget; N],
+    ) -> ByteArrayTarget;
 
     /// Bytearray matrix application.
     fn bytearray_matrix_apply_bits<const M: usize, const N: usize>(
@@ -219,14 +219,10 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
 
     fn gf_2_8_add_bits(
         &mut self,
-        x_bits: [BoolTarget; 8],
-        y_bits: [BoolTarget; 8],
-    ) -> [BoolTarget; 8] {
-        let sum_bits = std::iter::zip(x_bits, y_bits)
-            .map(|(a, b)| xor(self, a, b))
-            .collect::<Vec<_>>();
-
-        array::from_fn(|i| sum_bits[i])
+        x_bits: ByteArrayTarget,
+        y_bits: ByteArrayTarget,
+    ) -> ByteArrayTarget {
+        byte_xor(self, x_bits, y_bits)
     }
 
     fn gf_2_8_mul(&mut self, x: Target, y: Target) -> Target {
@@ -239,9 +235,9 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
 
     fn gf_2_8_mul_bits(
         &mut self,
-        x_bits: [BoolTarget; 8],
-        y_bits: [BoolTarget; 8],
-    ) -> [BoolTarget; 8] {
+        x_bits: ByteArrayTarget,
+        y_bits: ByteArrayTarget,
+    ) -> ByteArrayTarget {
         let zero_bits = vec![self._false(); 8];
         assert!(x_bits.len() == 8 && y_bits.len() == 8);
 
@@ -253,7 +249,7 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
             let y_shifted: [_; 8] = array::from_fn(|i| if i == 0 { zero } else { y[i - 1] });
 
             let offset: [_; 8] = array::from_fn(|i| builder.and(y[7], potential_offset[i]));
-            array::from_fn(|i| xor(builder, y_shifted[i], offset[i]))
+            byte_xor(builder, y_shifted, offset)
         };
 
         let powers_times_x = (0..8)
@@ -270,9 +266,10 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
             .collect::<Vec<_>>()
             .into_iter()
             .fold(zero_bits, |acc, term| {
-                std::iter::zip(acc, term)
-                    .map(|(a, b)| xor(self, a, b))
-                    .collect::<Vec<_>>()
+                // TODO
+                let acc = array::from_fn(|i| acc[i]);
+                let term = array::from_fn(|i| term[i]);
+                byte_xor(self, acc, term).to_vec()
             });
 
         array::from_fn(|i| prod_bits[i])
@@ -280,9 +277,9 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
 
     fn bytearray_ip_bits<const N: usize>(
         &mut self,
-        x: [[BoolTarget; 8]; N],
-        y: [[BoolTarget; 8]; N],
-    ) -> [BoolTarget; 8] {
+        x: [ByteArrayTarget; N],
+        y: [ByteArrayTarget; N],
+    ) -> ByteArrayTarget {
         let zero = self.zero();
         let zero_bits = bitarray_from_bytetarget(self, zero);
 
@@ -333,7 +330,18 @@ pub fn sbox_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
     ))
 }
 
-pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[[BoolTarget; 8]; 4]; 4] {
+pub fn byte_xor_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
+    let xor_table: Vec<(u16, u16)> = (0..u8::MAX as usize)
+        .flat_map(|x| {
+            (0..u8::MAX as usize)
+                .map(|y| (((x as u16) << 8) + y as u16, (x as u16) ^ (y as u16)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    builder.add_lookup_table_from_pairs(Arc::new(xor_table))
+}
+
+pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[ByteArrayTarget; 4]; 4] {
     let one = builder.one();
     let two = builder.two();
     let three = builder.constant(F::from_canonical_u64(3));
@@ -359,6 +367,23 @@ pub fn xor(builder: &mut CircuitBuilder<F, D>, x: BoolTarget, y: BoolTarget) -> 
     ))
 }
 
+pub fn byte_xor(
+    builder: &mut CircuitBuilder<F, D>,
+    x: ByteArrayTarget,
+    y: ByteArrayTarget,
+) -> ByteArrayTarget {
+    array::from_fn(|i| {
+        let x_or_y = builder.or(x[i], y[i]);
+        BoolTarget::new_unsafe(builder.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            x[i].target,
+            y[i].target,
+            x_or_y.target,
+        ))
+    })
+}
+
 // LE bit array conversions
 pub fn target_from_bitarray(builder: &mut CircuitBuilder<F, D>, x: &[BoolTarget]) -> Target {
     let zero = builder.zero();
@@ -368,7 +393,7 @@ pub fn target_from_bitarray(builder: &mut CircuitBuilder<F, D>, x: &[BoolTarget]
         .fold(zero, |acc, b| builder.mul_add(two, acc, b.target))
 }
 
-pub fn bitarray_from_bytetarget(builder: &mut CircuitBuilder<F, D>, x: Target) -> [BoolTarget; 8] {
+pub fn bitarray_from_bytetarget(builder: &mut CircuitBuilder<F, D>, x: Target) -> ByteArrayTarget {
     let x_bits = builder.split_le(x, 8);
     array::from_fn(|i| x_bits[i])
 }
@@ -399,11 +424,13 @@ mod tests {
     };
     use rand::RngExt;
 
-    use super::{
-        ByteArrayTarget, CircuitBuilderAESState, D, PartialWitnessAESState,
-        PartialWitnessByteArray, sbox_lut, state_mix_matrix_bits,
+    use crate::{
+        circuit_aes::{
+            byte_xor_lut, sbox_lut, state_mix_matrix_bits, ByteArrayTarget, CircuitBuilderAESState,
+            PartialWitnessAESState, PartialWitnessByteArray,
+        },
+        native_aes::{encrypt_block, key_expansion, mix_columns, sub_bytes, State},
     };
-    use crate::native_aes::{State, encrypt_block, key_expansion, mix_columns, sub_bytes};
 
     #[test]
     fn test_sub_bytes() -> Result<()> {
