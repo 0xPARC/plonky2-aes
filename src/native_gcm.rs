@@ -67,7 +67,11 @@ where
 }
 
 /// GCM-Ctr, Section 6.5, Algorithm 3
-fn gctr<const NR: usize>(key: [[u8; 4]; 4 * (NR + 1)], icb: &[u8; 16], x: &[u8]) -> Vec<u8> {
+pub(crate) fn gctr<const NR: usize>(
+    key: [[u8; 4]; 4 * (NR + 1)],
+    icb: &[u8; 16],
+    x: &[u8],
+) -> Vec<u8> {
     if x.is_empty() {
         return x.to_vec();
     }
@@ -103,7 +107,7 @@ fn gctr<const NR: usize>(key: [[u8; 4]; 4 * (NR + 1)], icb: &[u8; 16], x: &[u8])
 }
 
 /// Section 6.4, Algorithm 2
-fn ghash(h: [u8; 16], x: &[u8]) -> [u8; 16] {
+pub(crate) fn ghash(h: [u8; 16], x: &[u8]) -> [u8; 16] {
     assert!(x.len().is_multiple_of(16)); // multiple of 128 bits
     let m = x.len() / 16;
 
@@ -162,7 +166,7 @@ fn right_shift_one(block: &mut [u8; 16]) {
 }
 
 /// increment the right-most 32 bits of the given block (128 bits). Section 2.
-pub fn inc32(b: [u8; 16]) -> [u8; 16] {
+pub(crate) fn inc32(b: [u8; 16]) -> [u8; 16] {
     let mut r = b;
     // counter = last 32bits
     let counter = u32::from_be_bytes([r[12], r[13], r[14], r[15]]);
@@ -173,7 +177,7 @@ pub fn inc32(b: [u8; 16]) -> [u8; 16] {
 }
 
 /// returns the t left-most (most-significant in BE) bits of the block
-pub fn msb_t(t_bytes: usize, block: &[u8]) -> Vec<u8> {
+pub(crate) fn msb_t(t_bytes: usize, block: &[u8]) -> Vec<u8> {
     let t = t_bytes * 8;
 
     let mut out = Vec::with_capacity(t.div_ceil(8));

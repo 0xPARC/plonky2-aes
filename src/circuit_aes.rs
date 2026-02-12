@@ -21,7 +21,17 @@ use crate::{
 #[derive(Debug, Copy, Clone)]
 pub struct StateTarget(pub [[ByteArrayTarget; 4]; 4]);
 
-// TODO: Normalise terminology!
+impl StateTarget {
+    pub(crate) fn flatten(self) -> [ByteArrayTarget; 16] {
+        array::from_fn(|i| self.0[i % 4][i / 4])
+    }
+
+    pub(crate) fn from_flat(b: [ByteArrayTarget; 16]) -> Self {
+        StateTarget(array::from_fn(|i| array::from_fn(|j| b[j * 4 + i])))
+    }
+}
+
+// TODO: Normalise terminology! maybe ByteArray-->Byte?
 pub type ByteArrayTarget = [BoolTarget; 8];
 
 pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
@@ -98,6 +108,9 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         a: [[ByteArrayTarget; N]; M],
         x: [ByteArrayTarget; N],
     ) -> [ByteArrayTarget; M];
+
+    /// returns a 0u8 in the shape of a ByteArrayTarget.
+    fn zero_byte(&mut self) -> ByteArrayTarget;
 }
 
 impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
@@ -298,6 +311,10 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         x: [ByteArrayTarget; N],
     ) -> [ByteArrayTarget; M] {
         std::array::from_fn(|i| self.bytearray_ip_bits(a[i], x))
+    }
+
+    fn zero_byte(&mut self) -> ByteArrayTarget {
+        array::from_fn(|_| BoolTarget::new_unsafe(self.zero()))
     }
 }
 

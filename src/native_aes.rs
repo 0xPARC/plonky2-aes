@@ -153,6 +153,14 @@ fn xor_words(w1: [u8; 4], w2: [u8; 4]) -> [u8; 4] {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_flatten_state() {
+        let s: [[u8; 4]; 4] = array::from_fn(|i| array::from_fn(|j| (i * 4 + j) as u8));
+
+        // the array::from_fn version is what we use later in the circuit
+        assert_eq!(flatten_state(s), array::from_fn(|i| s[i % 4][i / 4]));
+    }
+
     /// test against test vectors from Appendix A
     #[test]
     fn test_key_expansion() {
