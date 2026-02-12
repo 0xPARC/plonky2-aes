@@ -155,7 +155,8 @@ pub fn gf_2_128_mul(x: [u8; 16], y: [u8; 16]) -> [u8; 16] {
     }
     z
 }
-fn right_shift_one(block: &mut [u8; 16]) {
+
+pub(crate) fn right_shift_one(block: &mut [u8; 16]) {
     let mut carry = 0u8;
 
     for byte in block.iter_mut() {

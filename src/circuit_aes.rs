@@ -314,7 +314,7 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
     }
 
     fn zero_byte(&mut self) -> ByteArrayTarget {
-        array::from_fn(|_| BoolTarget::new_unsafe(self.zero()))
+        array::from_fn(|_| self._false())
     }
 }
 
