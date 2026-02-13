@@ -13,9 +13,117 @@ use plonky2::{
 };
 
 use crate::{
-    circuit_aes::{xor, ByteArrayTarget as ByteTarget, CircuitBuilderAESState, StateTarget},
+    circuit_aes::{
+        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteArrayTarget as ByteTarget,
+        CircuitBuilderAESState, StateTarget,
+    },
+    native_gcm::TAG_LEN,
     D,
 };
+
+/// L: max size of plaintext to cipher.
+fn encrypt_target<
+    const NK: usize,
+    const NB: usize,
+    const NR: usize,
+    const L: usize,
+    const TAG: bool,
+>(
+    builder: &mut CircuitBuilder<F, D>,
+    key: [ByteTarget; NK * NB],
+    nonce: &[ByteTarget; 12],
+    pt: &[ByteTarget; L],
+) -> ([ByteTarget; L], [ByteTarget; TAG_LEN / 8])
+where
+    [(); NK * NB]:,
+    [(); 4 * (NR + 1)]:,
+{
+    let sbox_lut = sbox_lut(builder);
+    let mix_matrix = state_mix_matrix_bits(builder);
+
+    let a: &[ByteTarget] = &[]; // additional authenticated data // TODO maybe as input
+
+    let expanded_key = builder.key_expansion::<NK, NB, NR>(sbox_lut, key);
+
+    let empty_state = builder.empty_state();
+
+    // 1. CIPH_K
+    let h = builder
+        .encrypt_block::<NR>(sbox_lut, mix_matrix, empty_state, expanded_key)
+        .flatten();
+
+    // 2. J_0
+    let zero_byte = builder.zero_byte();
+    let one_byte = array::from_fn(|i| {
+        // 0x01
+        if i == 0 {
+            builder._true()
+        } else {
+            builder._false()
+        }
+    });
+    let j0: [ByteTarget; 16] = if nonce.len() * 8 == 96 {
+        // J_0 = IV || 0^31 || 1
+        let mut out = [zero_byte; 16];
+        out[..12].copy_from_slice(nonce.as_slice());
+        out[12..16].copy_from_slice(&[zero_byte, zero_byte, zero_byte, one_byte]);
+        out
+    } else {
+        panic!("unsuported at initial version; nonce.len()=12 (96 bits)");
+    };
+
+    // 3. C=GCTR()
+    let inc32_j0 = inc32_target(builder, j0);
+    let c = gctr_target::<NR, L>(builder, sbox_lut, mix_matrix, expanded_key, &inc32_j0, &pt);
+
+    // the rest of the logic is for the tag; for some use cases we might skip it
+    // (saving a notable amount of gates, about double)
+    if !TAG {
+        let t: [ByteTarget; TAG_LEN / 8] = [zero_byte; TAG_LEN / 8];
+        return (c, t);
+    }
+
+    // 4. u, v
+    let u: usize = 16 * (L as f64 / 16_f64).ceil() as usize - L; // L=x.len()
+    let v: usize = 16 * (a.len() as f64 / 16_f64).ceil() as usize - a.len();
+
+    // 5. S = GHASH()
+    let const_a_len_u8: [u8; 8] = (a.len() * 8).to_be_bytes(); // const
+    let const_c_len_u8: [u8; 8] = (c.len() * 8).to_be_bytes(); // const
+    let a_len: [ByteTarget; 8] = array::from_fn(|byte_i| {
+        let const_bits = le_bits_from_byte(const_a_len_u8[byte_i]);
+        let byte: ByteTarget = array::from_fn(|bit_i| {
+            let bit_goldilocks = if const_bits[bit_i] { F::ONE } else { F::ZERO };
+            BoolTarget::new_unsafe(builder.constant(bit_goldilocks))
+        });
+        byte
+    });
+    let c_len: [ByteTarget; 8] = array::from_fn(|byte_i| {
+        let const_bits = le_bits_from_byte(const_c_len_u8[byte_i]);
+        let byte: ByteTarget = array::from_fn(|bit_i| {
+            let bit_goldilocks = if const_bits[bit_i] { F::ONE } else { F::ZERO };
+            BoolTarget::new_unsafe(builder.constant(bit_goldilocks))
+        });
+        byte
+    });
+    let ghash_input_vec = vec![
+        a.to_vec(),
+        vec![zero_byte; v],
+        c.to_vec(),
+        vec![zero_byte; u],
+        a_len.to_vec(),
+        c_len.to_vec(),
+    ]
+    .concat();
+    let s = ghash_target(builder, h, ghash_input_vec);
+
+    // 6. T=MSB(GCTR()))
+    let msb_input = gctr_target(builder, sbox_lut, mix_matrix, expanded_key, &j0, &s);
+    let t_vec = msb_t_target(builder, TAG_LEN / 8, &msb_input);
+    let mut t: [ByteTarget; TAG_LEN / 8] = [zero_byte; TAG_LEN / 8];
+    t.copy_from_slice(&t_vec);
+    (c, t)
+}
 
 /// L: max size of plaintext to cipher.
 fn gctr_target<const NR: usize, const L: usize>(
@@ -49,7 +157,7 @@ fn gctr_target<const NR: usize, const L: usize>(
             (xor_blocks(builder, x_i, ciph_cb_i), 16)
         } else {
             // last chunk, might be smaller than 16 bytes (L%16 bytes)
-            let msb_res = msb_t(builder, L % 16, ciph_cb_i.as_slice());
+            let msb_res = msb_t_target(builder, L % 16, ciph_cb_i.as_slice());
             let l = msb_res.len().min(16);
             let mut m: [ByteTarget; 16] = [zero_byte; 16];
             m[..l].copy_from_slice(&msb_res);
@@ -60,13 +168,17 @@ fn gctr_target<const NR: usize, const L: usize>(
     y
 }
 
-fn ghash_target<const L: usize>(
+// fn ghash_target<const L: usize>(
+fn ghash_target(
     builder: &mut CircuitBuilder<F, D>,
     h: [ByteTarget; 16],
-    x: &[ByteTarget; L],
+    // x: &[ByteTarget; L],
+    x: Vec<ByteTarget>,
 ) -> [ByteTarget; 16] {
-    assert!(L.is_multiple_of(16)); // multiple of 128 bits
-    let m = L / 16;
+    // assert!(L.is_multiple_of(16)); // multiple of 128 bits
+    // let m = L / 16;
+    assert!(x.len().is_multiple_of(16)); // multiple of 128 bits
+    let m = x.len() / 16;
 
     let zero_byte = builder.zero_byte();
     let mut y = [zero_byte; 16]; // (128 bits)
@@ -179,7 +291,7 @@ fn xor_blocks(
     array::from_fn(|i| xor_byte(builder, b1[i], b2[i]))
 }
 
-pub fn msb_t(
+pub fn msb_t_target(
     builder: &mut CircuitBuilder<F, D>,
     t_bytes: usize,
     block: &[ByteTarget],
@@ -223,11 +335,10 @@ mod tests {
             config::PoseidonGoldilocksConfig,
         },
     };
-    use rand::RngExt;
 
     use super::*;
     use crate::{
-        circuit_aes::{sbox_lut, state_mix_matrix_bits, PartialWitnessByteArray},
+        circuit_aes::PartialWitnessByteArray,
         native_aes::key_expansion,
         native_gcm::{gctr, gf_2_128_mul, ghash, right_shift_one},
     };
@@ -429,7 +540,8 @@ mod tests {
         let x_target: [ByteTarget; L] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
 
-        let ghash_out_target = ghash_target::<L>(&mut builder, h_target, &x_target);
+        // let ghash_out_target = ghash_target::<L>(&mut builder, h_target, &x_target);
+        let ghash_out_target = ghash_target(&mut builder, h_target, x_target.to_vec());
 
         println!("ghash (L:{}) num_gates: {}", L, builder.num_gates());
         let data = builder.build::<PoseidonGoldilocksConfig>();
@@ -441,6 +553,88 @@ mod tests {
 
         std::iter::zip(ghash_out_target, expected)
             .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+
+        let proof = data.prove(pw)?;
+        data.verify(proof)
+    }
+
+    #[test]
+    fn test_encrypt() -> Result<()> {
+        // AES-GCM-128
+        test_encrypt_opt::<4, 4, 10, 13, false>()?;
+        test_encrypt_opt::<4, 4, 10, 13, true>()?; // with tag
+        test_encrypt_opt::<4, 4, 10, 17, false>()?;
+
+        // AES-GCM-256
+        test_encrypt_opt::<8, 4, 14, 13, false>()?;
+
+        Ok(())
+    }
+    fn test_encrypt_opt<
+        const NK: usize,
+        const NB: usize,
+        const NR: usize,
+        const L: usize,
+        const TAG: bool,
+    >() -> Result<()>
+    where
+        [(); 4 * (NR + 1)]:,
+        [(); NK * NB]:,
+    {
+        let key: &[u8; NK * NB] = &[42; NK * NB];
+        let nonce: &[u8; 12] = &[111; 12];
+        let pt: &[u8; L] = &[42u8; L];
+
+        let (expected_c, expected_tag) = crate::native_gcm::encrypt::<NK, NB, NR>(key, nonce, pt);
+
+        // Circuit declaration
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let key_target: [ByteTarget; NK * NB] =
+            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
+        let nonce_target: [ByteTarget; 12] =
+            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
+        let pt_target: [ByteTarget; L] =
+            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
+        let (circuit_c, circuit_tag) = encrypt_target::<NK, NB, NR, L, TAG>(
+            &mut builder,
+            key_target,
+            &nonce_target,
+            &pt_target,
+        );
+
+        println!(
+            "encrypt (NK:{}, NB:{}, NR:{}, L:{}, TAG:{}) num_gates: {}",
+            NK,
+            NB,
+            NR,
+            L,
+            TAG,
+            builder.num_gates()
+        );
+        let data = builder.build::<PoseidonGoldilocksConfig>();
+
+        // set values to circuit
+        let mut pw = PartialWitness::<F>::new();
+        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
+        std::iter::zip(nonce_target, nonce)
+            .try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
+        std::iter::zip(pt_target, pt).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
+
+        // expect circuit's ciphertext to match rust native ciphertext
+        std::iter::zip(circuit_c, expected_c)
+            .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+
+        // if TAG==true, check computed tag, else expect it to be zero
+        if TAG {
+            std::iter::zip(circuit_tag, expected_tag)
+                .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        } else {
+            circuit_tag
+                .iter()
+                .try_for_each(|t| pw.set_byte_array_target(*t, 0))?;
+        }
 
         let proof = data.prove(pw)?;
         data.verify(proof)

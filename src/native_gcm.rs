@@ -10,7 +10,7 @@
 use crate::native_aes::{encrypt_block, flatten_state, key_expansion};
 
 // supported tag length
-const TAG_LEN: usize = 128;
+pub const TAG_LEN: usize = 128;
 
 /// Section 7.1 from https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 pub fn encrypt<const NK: usize, const NB: usize, const NR: usize>(
@@ -43,6 +43,7 @@ where
     let c = gctr(expanded_key, &inc32(j0), pt);
 
     // 4. u, v
+    // note: c.len() will be x.len(), "L" in the circuit
     let u: usize = 16 * (c.len() as f64 / 16_f64).ceil() as usize - c.len();
     let v: usize = 16 * (a.len() as f64 / 16_f64).ceil() as usize - a.len();
 
@@ -139,20 +140,16 @@ pub fn gf_2_128_mul(x: [u8; 16], y: [u8; 16]) -> [u8; 16] {
     let mut z = [0u8; 16];
     let mut v = y;
     for i in 0..128 {
-        dbg!(i);
         // xi: i-th bit of x
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
         let xi = (x[byte_index] >> bit_index) & 1;
 
-        // dbg!(z, v);
         if xi == 1 {
             z = xor_blocks(z, v);
         }
-        // dbg!(&z);
         let lsb = v[15] & 1;
         right_shift_one(&mut v);
-        dbg!(lsb == 1);
         if lsb == 1 {
             v = xor_blocks(v, R);
         }
@@ -177,7 +174,6 @@ pub(crate) fn gf_2_128_mul_circuit_version(
     let mut z = [zero_byte; 16];
     let mut v = y;
     for i in 0..128 {
-        dbg!(i);
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
         let xi = x[byte_index][bit_index];
