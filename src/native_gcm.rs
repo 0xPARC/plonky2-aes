@@ -139,21 +139,92 @@ pub fn gf_2_128_mul(x: [u8; 16], y: [u8; 16]) -> [u8; 16] {
     let mut z = [0u8; 16];
     let mut v = y;
     for i in 0..128 {
+        dbg!(i);
         // xi: i-th bit of x
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
         let xi = (x[byte_index] >> bit_index) & 1;
 
+        // dbg!(z, v);
         if xi == 1 {
             z = xor_blocks(z, v);
         }
+        // dbg!(&z);
         let lsb = v[15] & 1;
         right_shift_one(&mut v);
+        dbg!(lsb == 1);
         if lsb == 1 {
             v = xor_blocks(v, R);
         }
     }
     z
+}
+
+// auxiliary version for testing the circuit logic
+pub(crate) fn gf_2_128_mul_circuit_version(
+    x: [[bool; 8]; 16],
+    y: [[bool; 8]; 16],
+) -> [[bool; 8]; 16] {
+    let zero_byte = [false; 8];
+
+    // R: 10000111 || 0^120 (in little-endian)
+    let mut r = [zero_byte; 16];
+    r[0][0] = true;
+    r[0][5] = true;
+    r[0][6] = true;
+    r[0][7] = true;
+
+    let mut z = [zero_byte; 16];
+    let mut v = y;
+    for i in 0..128 {
+        dbg!(i);
+        let byte_index = i / 8;
+        let bit_index = 7 - (i % 8);
+        let xi = x[byte_index][bit_index];
+
+        // set z = if xi==1: z^v, else: z
+        for b in 0..16 {
+            for k in 0..8 {
+                let z_xor_v = z[b][k] ^ v[b][k];
+                z[b][k] = if xi { z_xor_v } else { z[b][k] };
+            }
+        }
+
+        // let lsb = v[15][7].clone();
+        let lsb = v[15][0].clone(); // (little-endian)
+        v = right_shift_one_circuit_version(&v);
+
+        // if lsb==1: v=v^R, else: v
+        for b in 0..16 {
+            for k in 0..8 {
+                let v_xor_r = v[b][k] ^ r[b][k];
+                v[b][k] = if lsb { v_xor_r } else { v[b][k] };
+            }
+        }
+    }
+    z
+}
+// method for debugging
+fn bools_to_u8_le(bits: [bool; 8]) -> u8 {
+    bits.iter()
+        .enumerate()
+        .fold(0u8, |acc, (i, &bit)| if bit { acc | (1 << i) } else { acc })
+}
+fn right_shift_one_circuit_version(v: &[[bool; 8]; 16]) -> [[bool; 8]; 16] {
+    let mut r: [[bool; 8]; 16] = v.clone();
+    let mut carry = false;
+    for i in 0..16 {
+        let current = v[i];
+        let next_carry = current[0];
+        let mut shifted = [false; 8];
+        for j in 0..7 {
+            shifted[j] = current[j + 1];
+        }
+        shifted[7] = carry;
+        r[i] = shifted;
+        carry = next_carry;
+    }
+    r
 }
 
 pub(crate) fn right_shift_one(block: &mut [u8; 16]) {

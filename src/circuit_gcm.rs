@@ -83,16 +83,14 @@ fn gf_2_128_mul_target(
     x: [ByteTarget; 16],
     y: [ByteTarget; 16],
 ) -> [ByteTarget; 16] {
-    // WIP TODO
-
     let zero_byte = builder.zero_byte();
     let one_bool = builder._true();
 
-    // R: 11100001 || 0^120
+    // R: 10000111 || 0^120 (in little-endian)
     let mut r = [zero_byte; 16];
     r[0][0] = one_bool;
-    r[0][1] = one_bool;
-    r[0][2] = one_bool;
+    r[0][5] = one_bool;
+    r[0][6] = one_bool;
     r[0][7] = one_bool;
 
     let mut z = [zero_byte; 16];
@@ -100,7 +98,6 @@ fn gf_2_128_mul_target(
     for i in 0..128 {
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
-        // dbg!(byte_index, bit_index);
         let xi = x[byte_index][bit_index];
 
         // set z = if xi==1: z^v, else: z
@@ -112,7 +109,7 @@ fn gf_2_128_mul_target(
             }
         }
 
-        let lsb = v[15][7].clone();
+        let lsb = v[15][0].clone(); // (little-endian)
         v = right_shift_one_target(builder, &v);
 
         // if lsb==1: v=v^R, else: v
@@ -347,10 +344,10 @@ mod tests {
     fn test_gf_mul() -> Result<()> {
         // AES-GCM-128
         test_gf_mul_opt::<4, 4, 10, 16>()?;
-        // test_gf_mul_opt::<4, 4, 10, 32>()?;
-        //
-        // // AES-GCM-256
-        // test_gf_mul_opt::<8, 4, 14, 16>()?;
+        test_gf_mul_opt::<4, 4, 10, 32>()?;
+
+        // AES-GCM-256
+        test_gf_mul_opt::<8, 4, 14, 16>()?;
 
         Ok(())
     }
@@ -364,6 +361,16 @@ mod tests {
         let y: [u8; 16] = [222; 16];
 
         let expected = gf_2_128_mul(x, y);
+        let x_bits: [[bool; 8]; 16] =
+            array::from_fn(|b| crate::circuit_aes::le_bits_from_byte(x[b]));
+        let y_bits: [[bool; 8]; 16] =
+            array::from_fn(|b| crate::circuit_aes::le_bits_from_byte(y[b]));
+
+        // sanity check
+        let expected2 = crate::native_gcm::gf_2_128_mul_circuit_version(x_bits, y_bits);
+        let expected_bits: [[bool; 8]; 16] =
+            array::from_fn(|b| crate::circuit_aes::le_bits_from_byte(expected[b]));
+        assert_eq!(expected2, expected_bits);
 
         // Circuit declaration
         let config = CircuitConfig::standard_recursion_config();
