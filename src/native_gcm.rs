@@ -269,8 +269,8 @@ mod tests {
     use super::*;
 
     use aes_gcm::{
-        Aes128Gcm, Aes256Gcm, Nonce,
         aead::{Aead, KeyInit},
+        Aes128Gcm, Aes256Gcm, Nonce,
     };
     use rand::Rng;
 
@@ -335,8 +335,8 @@ mod tests {
         test_with_external_lib_op::<4, 4, 10, Aes128Gcm>()?;
         test_with_external_lib_op::<8, 4, 14, Aes256Gcm>()
     }
-    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>()
-    -> anyhow::Result<()>
+    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>(
+    ) -> anyhow::Result<()>
     where
         [(); NK * NB]:,
         [(); 4 * (NR + 1)]:,

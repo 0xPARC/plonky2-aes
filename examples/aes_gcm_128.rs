@@ -1,4 +1,4 @@
-//! Run in real mode: `cargo run --release --example aes_gcm_128`
+//! Run: `cargo run --release --example aes_gcm_128`
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
@@ -15,13 +15,23 @@ use plonky2::{
 use plonky2_aes::{AesGcm128Target, D, KEY_LEN_128};
 
 fn main() -> Result<()> {
-    const L: usize = 42; // size (bytes) of plaintext to encrypt
+    // max size (bytes) of plaintext supported by the instantiation of the circuit
+    const L: usize = 42;
 
-    let key: &[u8; KEY_LEN_128] = &[42; KEY_LEN_128];
+    let key: &[u8; KEY_LEN_128] = &[123; KEY_LEN_128];
     let nonce: &[u8; 12] = &[111; 12];
-    let pt: &[u8; L] = &[42u8; L];
+    let pt: &[u8; L] = &[231u8; L]; // plaintext
 
-    let (ct, tag) = plonky2_aes::native_gcm::encrypt::<4, 4, 10>(key, nonce, pt);
+    // use external rust library to compute the ciphertext & tag
+    let nonce_ext = aes_gcm::Nonce::from_slice(nonce);
+    use aes_gcm::{aead::Aead, KeyInit}; // needed traits
+    let cipher = aes_gcm::Aes128Gcm::new_from_slice(key.as_slice()).unwrap();
+    let encrypt_res = cipher.encrypt(nonce_ext, pt.as_ref()).unwrap();
+    let ct = &encrypt_res[..L]; // ciphertext
+    let tag = &encrypt_res[L..];
+
+    // alternatively we could use this repo's rust implementation (only for tests)
+    // let (ct, tag) = plonky2_aes::native_gcm::encrypt::<4, 4, 10>(key, nonce, pt);
 
     // Circuit declaration
     let config = CircuitConfig::standard_recursion_config();

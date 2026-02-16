@@ -1,4 +1,7 @@
 //! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//!
+//! Plonky2 circuit implementation of
+//! [AES](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf).
 
 use std::{array, sync::Arc};
 
@@ -13,9 +16,9 @@ use plonky2::{
 };
 
 use crate::{
-    D,
     constants::{RCON, SBOX},
-    native_aes::{State, rot_word, shift_rows},
+    native_aes::{rot_word, shift_rows, State},
+    D,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -62,7 +65,7 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
 
     /// AddRoundKey
     fn state_add_round_key(&mut self, round_key: &[[ByteTarget; 4]], s: StateTarget)
-    -> StateTarget;
+        -> StateTarget;
 
     /// KeyExpansion
     fn key_expansion<const NK: usize, const NB: usize, const NR: usize>(
@@ -411,10 +414,10 @@ mod tests {
     use rand::RngExt;
 
     use super::{
-        ByteTarget, CircuitBuilderAESState, PartialWitnessAESState, PartialWitnessByteArray,
-        sbox_lut, state_mix_matrix_bits,
+        sbox_lut, state_mix_matrix_bits, ByteTarget, CircuitBuilderAESState,
+        PartialWitnessAESState, PartialWitnessByteArray,
     };
-    use crate::native_aes::{State, encrypt_block, key_expansion, mix_columns, sub_bytes};
+    use crate::native_aes::{encrypt_block, key_expansion, mix_columns, sub_bytes, State};
 
     use super::D;
 

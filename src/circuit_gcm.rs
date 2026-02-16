@@ -1,4 +1,7 @@
 //! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//!
+//! Plonky2 circuit implementation of
+//! [AES-GCM (Galois Counter Mode)](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
 
 use anyhow::Result;
 use std::array;
@@ -11,12 +14,12 @@ use plonky2::{
 };
 
 use crate::{
-    D,
     circuit_aes::{
-        ByteTarget, CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
-        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor,
+        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteTarget,
+        CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
     },
     constants::TAG_LEN,
+    D,
 };
 
 pub struct AesGcmTarget<
@@ -253,11 +256,8 @@ fn gctr_target<const NR: usize, const L: usize>(
 fn ghash_target(
     builder: &mut CircuitBuilder<F, D>,
     h: [ByteTarget; 16],
-    // x: &[ByteTarget; L],
     x: Vec<ByteTarget>,
 ) -> [ByteTarget; 16] {
-    // assert!(L.is_multiple_of(16)); // multiple of 128 bits
-    // let m = L / 16;
     assert!(x.len().is_multiple_of(16)); // multiple of 128 bits
     let m = x.len() / 16;
 
@@ -435,8 +435,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
-    -> Result<()>
+    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
+    ) -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -541,8 +541,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
-    -> Result<()>
+    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
+    ) -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -599,8 +599,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
-    -> Result<()>
+    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
+    ) -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,

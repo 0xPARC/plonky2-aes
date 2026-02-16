@@ -14,7 +14,7 @@ pub const D: usize = 2;
 
 pub use circuit_gcm::AesGcmTarget;
 
-// expose pre-defined configurations (AES 128, 192, 256):
+// expose pre-defined configurations (AES-128, AES-192, AES-256):
 
 pub type AesGcm128Target<const L: usize> = AesGcmTarget<4, 4, 10, L, false>;
 pub const KEY_LEN_128: usize = 4 * 4;
