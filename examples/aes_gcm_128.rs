@@ -1,4 +1,5 @@
 //! Run in real mode: `cargo run --release --example aes_gcm_128`
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use anyhow::Result;

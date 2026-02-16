@@ -11,12 +11,12 @@ use plonky2::{
 };
 
 use crate::{
+    D,
     circuit_aes::{
-        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteTarget,
-        CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
+        ByteTarget, CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
+        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor,
     },
     constants::TAG_LEN,
-    D,
 };
 
 pub struct AesGcmTarget<
@@ -28,7 +28,7 @@ pub struct AesGcmTarget<
     const TAG: bool,
 > where
     [(); NK * NB]:,
-    [(); 4 * (NR + 1)]:, // TODO rm
+    [(); 4 * (NR + 1)]:,
 {
     key: [ByteTarget; NK * NB],
     nonce: [ByteTarget; 12],
@@ -42,7 +42,7 @@ impl<const NK: usize, const NB: usize, const NR: usize, const L: usize, const TA
     AesGcmTarget<NK, NB, NR, L, TAG>
 where
     [(); NK * NB]:,
-    [(); 4 * (NR + 1)]:, // TODO rm
+    [(); 4 * (NR + 1)]:,
 {
     pub fn new_virtual(builder: &mut CircuitBuilder<F, D>) -> Self {
         let key: [ByteTarget; NK * NB] =
@@ -66,11 +66,7 @@ where
         }
     }
 
-    pub fn build_circuit(&self, builder: &mut CircuitBuilder<F, D>)
-    // where
-    // [(); NK * NB]:,
-    // [(); 4 * (NR + 1)]:,
-    {
+    pub fn build_circuit(&self, builder: &mut CircuitBuilder<F, D>) {
         let sbox_lut = sbox_lut(builder);
         let mix_matrix = state_mix_matrix_bits(builder);
 
@@ -117,6 +113,7 @@ where
         );
 
         // connect the ct value to the external ct value
+        #[allow(clippy::needless_range_loop)]
         for byte in 0..L {
             for bit in 0..8 {
                 builder.connect(self.ct[byte][bit].target, c[byte][bit].target);
@@ -152,7 +149,7 @@ where
             });
             byte
         });
-        let ghash_input_vec = vec![
+        let ghash_input_vec = [
             a.to_vec(),
             vec![zero_byte; v],
             c.to_vec(),
@@ -170,6 +167,7 @@ where
         t.copy_from_slice(&t_vec);
 
         // connect the computed tag value to the external tag value
+        #[allow(clippy::needless_range_loop)]
         for byte in 0..TAG_LEN / 8 {
             for bit in 0..8 {
                 builder.connect(self.tag[byte][bit].target, t[byte][bit].target);
@@ -192,11 +190,11 @@ where
 
         // extend to expected sizes
         let mut pt_arr: [u8; L] = [0u8; L];
-        pt_arr.copy_from_slice(&pt);
+        pt_arr.copy_from_slice(pt);
         let mut ct_arr: [u8; L] = [0u8; L];
-        ct_arr.copy_from_slice(&ct);
+        ct_arr.copy_from_slice(ct);
         let mut tag_arr: [u8; TAG_LEN / 8] = [0u8; TAG_LEN / 8];
-        tag_arr.copy_from_slice(&tag);
+        tag_arr.copy_from_slice(tag);
 
         std::iter::zip(self.key, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
         std::iter::zip(self.nonce, nonce).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
@@ -219,7 +217,7 @@ fn gctr_target<const NR: usize, const L: usize>(
 ) -> [ByteTarget; L] {
     let n = ((L * 8) as f64 / 128_f64).ceil() as usize;
 
-    let mut y: [ByteTarget; L] = x.clone();
+    let mut y: [ByteTarget; L] = *x;
     let mut cb_i = *icb;
 
     let zero_byte = builder.zero_byte();
@@ -304,7 +302,7 @@ fn gf_2_128_mul_target(
             }
         }
 
-        let lsb = v[15][0].clone(); // (little-endian)
+        let lsb = v[15][0]; // (little-endian)
         v = right_shift_one_target(builder, &v);
 
         // if lsb==1: v=v^R, else: v
@@ -322,7 +320,7 @@ pub fn right_shift_one_target(
     builder: &mut CircuitBuilder<F, D>,
     v: &[ByteTarget; 16],
 ) -> [ByteTarget; 16] {
-    let mut r: [ByteTarget; 16] = v.clone();
+    let mut r: [ByteTarget; 16] = *v;
 
     let mut carry = builder._false();
     for i in 0..16 {
@@ -331,9 +329,7 @@ pub fn right_shift_one_target(
         let next_carry = current[0];
 
         let mut shifted = [builder._false(); 8];
-        for j in 0..7 {
-            shifted[j] = current[j + 1];
-        }
+        shifted[..7].copy_from_slice(&current[1..(7 + 1)]);
         shifted[7] = carry;
         r[i] = shifted;
         carry = next_carry;
@@ -351,7 +347,7 @@ pub fn inc32_target(
     for byte_index in (12..16).rev() {
         for bit_index in 0..8 {
             let a = block[byte_index][bit_index];
-            // builder.assert_bool(a); // TODO we can assume it's valid bool, skip check
+            // builder.assert_bool(a); // Note: we can assume it's valid bool, skip check
 
             let sum = xor(builder, a, carry);
             let carry_out = builder.and(a, carry);
@@ -385,8 +381,8 @@ pub fn msb_t_target(
     let rem_bits = t % 8;
 
     let mut out: Vec<ByteTarget> = Vec::new();
-    for i in 0..full_bytes {
-        out.push(block[i]);
+    for block_i in block.iter().take(full_bytes) {
+        out.push(*block_i);
     }
 
     let zero_bool = BoolTarget::new_unsafe(builder.zero());
@@ -439,8 +435,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -451,7 +447,7 @@ mod tests {
         let icb: &[u8; 16] = &[222; 16];
         let pt: &[u8; L] = &[42u8; L];
 
-        let expected = gctr(expanded_key, &icb, pt);
+        let expected = gctr(expanded_key, icb, pt);
 
         // Circuit declaration
         let config = CircuitConfig::standard_recursion_config();
@@ -507,7 +503,7 @@ mod tests {
     fn test_right_shift_one() -> Result<()> {
         let x: [u8; 16] = [111; 16];
 
-        let mut expected = x.clone();
+        let mut expected = x;
         right_shift_one(&mut expected);
 
         // Circuit declaration
@@ -545,8 +541,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -603,8 +599,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,

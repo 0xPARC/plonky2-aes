@@ -33,7 +33,6 @@ pub(crate) fn encrypt_block<const NR: usize>(
     let mut s: State = [[0; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
-            // TODO
             s[i][j] = input[i + 4 * j];
         }
     }
@@ -225,7 +224,7 @@ mod tests {
     }
 
     use aes::{
-        cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit},
+        cipher::{BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit, generic_array::GenericArray},
         {Aes128, Aes192, Aes256},
     };
     use rand::RngExt;

@@ -21,7 +21,7 @@ pub fn encrypt<const NK: usize, const NB: usize, const NR: usize>(
 where
     [(); 4 * (NR + 1)]:,
 {
-    let a: &[u8] = &[]; // additional authenticated data // TODO maybe as input
+    let a: &[u8] = &[]; // additional authenticated data
     let expanded_key: [[u8; 4]; 4 * (NR + 1)] = key_expansion::<NK, NB, NR>(key);
 
     // 1. CIPH_K
@@ -186,8 +186,7 @@ pub(crate) fn gf_2_128_mul_circuit_version(
             }
         }
 
-        // let lsb = v[15][7].clone();
-        let lsb = v[15][0].clone(); // (little-endian)
+        let lsb = v[15][0]; // (little-endian)
         v = right_shift_one_circuit_version(&v);
 
         // if lsb==1: v=v^R, else: v
@@ -207,15 +206,13 @@ fn bools_to_u8_le(bits: [bool; 8]) -> u8 {
         .fold(0u8, |acc, (i, &bit)| if bit { acc | (1 << i) } else { acc })
 }
 fn right_shift_one_circuit_version(v: &[[bool; 8]; 16]) -> [[bool; 8]; 16] {
-    let mut r: [[bool; 8]; 16] = v.clone();
+    let mut r: [[bool; 8]; 16] = *v;
     let mut carry = false;
     for i in 0..16 {
         let current = v[i];
         let next_carry = current[0];
         let mut shifted = [false; 8];
-        for j in 0..7 {
-            shifted[j] = current[j + 1];
-        }
+        shifted[..7].copy_from_slice(&current[1..(7 + 1)]);
         shifted[7] = carry;
         r[i] = shifted;
         carry = next_carry;
@@ -272,8 +269,8 @@ mod tests {
     use super::*;
 
     use aes_gcm::{
-        aead::{Aead, KeyInit},
         Aes128Gcm, Aes256Gcm, Nonce,
+        aead::{Aead, KeyInit},
     };
     use rand::Rng;
 
@@ -338,8 +335,8 @@ mod tests {
         test_with_external_lib_op::<4, 4, 10, Aes128Gcm>()?;
         test_with_external_lib_op::<8, 4, 14, Aes256Gcm>()
     }
-    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>(
-    ) -> anyhow::Result<()>
+    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>()
+    -> anyhow::Result<()>
     where
         [(); NK * NB]:,
         [(); 4 * (NR + 1)]:,
