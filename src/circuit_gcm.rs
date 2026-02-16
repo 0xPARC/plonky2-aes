@@ -1,14 +1,10 @@
 //! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
 
-use std::{array, sync::Arc};
+use std::array;
 
 use plonky2::{
-    field::{extension::Extendable, goldilocks_field::GoldilocksField as F, types::Field},
-    hash::hash_types::RichField,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    field::{goldilocks_field::GoldilocksField as F, types::Field},
+    iop::target::BoolTarget,
     plonk::circuit_builder::CircuitBuilder,
 };
 
@@ -22,7 +18,7 @@ use crate::{
 };
 
 /// L: max size of plaintext to cipher.
-fn encrypt_target<
+pub fn encrypt_target<
     const NK: usize,
     const NB: usize,
     const NR: usize,
