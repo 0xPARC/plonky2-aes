@@ -561,12 +561,30 @@ mod tests {
     #[test]
     fn test_encrypt() -> Result<()> {
         // AES-GCM-128
-        test_encrypt_opt::<4, 4, 10, 13, false>()?;
-        test_encrypt_opt::<4, 4, 10, 13, true>()?; // with tag
-        test_encrypt_opt::<4, 4, 10, 17, false>()?;
+        test_encrypt_opt::<4, 4, 10, 13, false>(false)?;
+        test_encrypt_opt::<4, 4, 10, 13, true>(false)?; // with tag
+        test_encrypt_opt::<4, 4, 10, 17, false>(false)?;
 
         // AES-GCM-256
-        test_encrypt_opt::<8, 4, 14, 13, false>()?;
+        test_encrypt_opt::<8, 4, 14, 13, false>(false)?;
+
+        Ok(())
+    }
+    // run it with: cargo test -- --ignored
+    #[ignore]
+    #[test]
+    fn test_encrypt_report_sizes() -> Result<()> {
+        // AES-GCM-128
+        test_encrypt_opt::<4, 4, 10, 16, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 17, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 32, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 33, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 64, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 128, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 256, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 512, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 1024, false>(true)?;
+        test_encrypt_opt::<4, 4, 10, 2048, false>(true)?;
 
         Ok(())
     }
@@ -576,7 +594,9 @@ mod tests {
         const NR: usize,
         const L: usize,
         const TAG: bool,
-    >() -> Result<()>
+    >(
+        only_build: bool,
+    ) -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -614,6 +634,10 @@ mod tests {
             builder.num_gates()
         );
         let data = builder.build::<PoseidonGoldilocksConfig>();
+
+        if only_build {
+            return Ok(());
+        }
 
         // set values to circuit
         let mut pw = PartialWitness::<F>::new();
