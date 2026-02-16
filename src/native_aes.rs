@@ -3,8 +3,8 @@
 //! Rust native implementation of
 //! [AES](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf) having
 //! in mind the approach that will be done in-circuit; this means that it is not
-//! written in the most rust idiomatic way, but simulating the behavior that we
-//! will do later inside the circuit.
+//! written in the most rust idiomatic way, nor memory-efficient, but simulating
+//! the behavior that we will do later inside the circuit.
 
 use std::array;
 
@@ -12,7 +12,7 @@ use crate::constants::{RCON, SBOX};
 
 pub(crate) type State = [[u8; 4]; 4];
 
-fn flatten_state(s: State) -> [u8; 16] {
+pub(crate) fn flatten_state(s: State) -> [u8; 16] {
     let mut r = [0u8; 16];
     for i in 0..4 {
         for j in 0..4 {
@@ -217,7 +217,7 @@ mod tests {
     }
 
     use aes::{
-        cipher::{BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit, generic_array::GenericArray},
+        cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit},
         {Aes128, Aes192, Aes256},
     };
     use rand::RngExt;
