@@ -3,6 +3,11 @@
 //! Constants for the implementation of AES following the specification from
 //! https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf.
 
+// pub const NB: usize = 4;
+
+/// supported tag length
+pub const TAG_LEN: usize = 128;
+
 /// table 4, page 14
 pub(crate) const SBOX: [u8; 256] = [
     // 0    1     2     3     4     5     6     7     8     9     a     b     c     d     e     f

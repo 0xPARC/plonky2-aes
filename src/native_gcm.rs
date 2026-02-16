@@ -7,10 +7,10 @@
 //! simulating the behavior that we will do later inside the circuit.
 //!
 
-use crate::native_aes::{encrypt_block, flatten_state, key_expansion};
-
-// supported tag length
-pub const TAG_LEN: usize = 128;
+use crate::{
+    constants::TAG_LEN,
+    native_aes::{encrypt_block, flatten_state, key_expansion},
+};
 
 /// Section 7.1 from https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 pub fn encrypt<const NK: usize, const NB: usize, const NR: usize>(
