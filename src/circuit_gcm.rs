@@ -10,7 +10,7 @@ use plonky2::{
 
 use crate::{
     circuit_aes::{
-        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteArrayTarget as ByteTarget,
+        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteTarget,
         CircuitBuilderAESState, StateTarget,
     },
     native_gcm::TAG_LEN,

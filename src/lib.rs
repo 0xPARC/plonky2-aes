@@ -12,7 +12,7 @@ pub mod native_gcm;
 /// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
 pub const D: usize = 2;
 
-use circuit_aes::ByteArrayTarget as ByteTarget;
+use circuit_aes::ByteTarget;
 use circuit_gcm::encrypt_target;
 use native_gcm::TAG_LEN;
 use plonky2::{
