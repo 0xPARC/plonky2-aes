@@ -4,3 +4,5 @@ Plonky2 circuits for AES encryption system as described at
 - AES-GCM (Galois Counter Mode): https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 
 > Warning: this code is unaudited.
+
+Example of usage at [examples](https://github.com/0xPARC/plonky2-aes/blob/main/examples) directory.

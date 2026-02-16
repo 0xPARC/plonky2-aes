@@ -12,43 +12,15 @@ pub mod native_gcm;
 /// D defines the extension degree of the field used in the Plonky2 proofs (quadratic extension).
 pub const D: usize = 2;
 
-pub use circuit_aes::{ByteTarget, PartialWitnessByteArray};
+pub use circuit_gcm::AesGcmTarget;
 
-use circuit_gcm::AesGcmTarget;
-// use native_gcm::TAG_LEN;
-// use plonky2::{
-//     field::goldilocks_field::GoldilocksField as F, plonk::circuit_builder::CircuitBuilder,
-// };
+// expose pre-defined configurations (AES 128, 192, 256):
 
 pub type AesGcm128Target<const L: usize> = AesGcmTarget<4, 4, 10, L, false>;
 pub const KEY_LEN_128: usize = 4 * 4;
-// pub fn aes128_encrypt_target<const L: usize>(
-//     builder: &mut CircuitBuilder<F, D>,
-//     key: [ByteTarget; 4 * 4],
-//     nonce: &[ByteTarget; 12],
-//     pt: &[ByteTarget; L],
-// ) -> ([ByteTarget; L], [ByteTarget; TAG_LEN / 8]) {
-//     encrypt_target::<4, 4, 10, L, false>(builder, key, &nonce, &pt)
-// }
 
+pub const KEY_LEN_192: usize = 6 * 4;
 pub type AesGcm192Target<const L: usize> = AesGcmTarget<6, 4, 12, L, false>;
-// pub const KEY_LEN_192: usize = 6 * 4;
-// pub fn aes192_encrypt_target<const L: usize>(
-//     builder: &mut CircuitBuilder<F, D>,
-//     key: [ByteTarget; 6 * 4],
-//     nonce: &[ByteTarget; 12],
-//     pt: &[ByteTarget; L],
-// ) -> ([ByteTarget; L], [ByteTarget; TAG_LEN / 8]) {
-//     encrypt_target::<6, 4, 12, L, false>(builder, key, &nonce, &pt)
-// }
 
+pub const KEY_LEN_256: usize = 8 * 4;
 pub type AesGcm256Target<const L: usize> = AesGcmTarget<8, 4, 14, L, false>;
-// pub const KEY_LEN_256: usize = 8 * 4;
-// pub fn aes256_encrypt_target<const L: usize>(
-//     builder: &mut CircuitBuilder<F, D>,
-//     key: [ByteTarget; 8 * 4],
-//     nonce: &[ByteTarget; 12],
-//     pt: &[ByteTarget; L],
-// ) -> ([ByteTarget; L], [ByteTarget; TAG_LEN / 8]) {
-//     encrypt_target::<8, 4, 14, L, false>(builder, key, &nonce, &pt)
-// }
