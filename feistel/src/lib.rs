@@ -100,7 +100,7 @@ mod tests {
 
         [f_keccak, f_poseidon].into_iter().for_each(|f| {
             (0..10).for_each(|_| {
-                let state: [_; { 2 * STATE_HALF_LEN }] = random_fields();
+                let state: [_; 2 * STATE_HALF_LEN] = random_fields();
                 let key_schedule: [[_; KEY_LEN]; NR] = std::array::from_fn(|_| random_fields());
 
                 let out_state = feistel_cipher(state, &key_schedule, &f);

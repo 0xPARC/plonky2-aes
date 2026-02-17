@@ -89,7 +89,6 @@ mod tests {
         field::goldilocks_field::GoldilocksField as F,
         hash::{
             hashing::hash_n_to_hash_no_pad,
-            keccak::KeccakHash,
             poseidon::{PoseidonHash, PoseidonPermutation},
         },
         iop::witness::{PartialWitness, WitnessWrite},
@@ -130,7 +129,7 @@ mod tests {
 
         let data = builder.build::<PoseidonGoldilocksConfig>();
         (0..10).try_for_each(|_| {
-            let state: [_; { 2 * STATE_HALF_LEN }] = random_fields();
+            let state: [_; 2 * STATE_HALF_LEN] = random_fields();
             let key_schedule: [[_; KEY_LEN]; NR] = std::array::from_fn(|_| random_fields());
             let eff = |fields: Vec<_>| {
                 hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(&fields).elements
