@@ -1,4 +1,4 @@
-//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
 //!
 //! Constants for the implementation of AES following the specification from
 //! https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf.

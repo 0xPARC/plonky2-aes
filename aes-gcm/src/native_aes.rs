@@ -1,4 +1,4 @@
-//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
 //!
 //! Rust native implementation of
 //! [AES](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf) having
@@ -224,8 +224,8 @@ mod tests {
     }
 
     use aes::{
+        Aes128, Aes192, Aes256,
         cipher::{BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit, generic_array::GenericArray},
-        {Aes128, Aes192, Aes256},
     };
     use rand::RngExt;
     /// test with loop of random-values against a rust well-tested library

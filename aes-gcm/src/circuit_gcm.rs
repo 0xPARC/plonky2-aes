@@ -1,25 +1,24 @@
-//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
 //!
 //! Plonky2 circuit implementation of
 //! [AES-GCM (Galois Counter Mode)](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
 
-use anyhow::Result;
 use std::array;
 
+use anyhow::Result;
 use plonky2::{
     field::{goldilocks_field::GoldilocksField as F, types::Field},
-    iop::target::BoolTarget,
-    iop::witness::PartialWitness,
+    iop::{target::BoolTarget, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
 
 use crate::{
+    D,
     circuit_aes::{
-        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor, ByteTarget,
-        CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
+        ByteTarget, CircuitBuilderAESState, PartialWitnessByteArray, StateTarget,
+        le_bits_from_byte, sbox_lut, state_mix_matrix_bits, xor,
     },
     constants::TAG_LEN,
-    D,
 };
 
 pub struct AesGcmTarget<
@@ -101,7 +100,7 @@ where
             out[12..16].copy_from_slice(&[zero_byte, zero_byte, zero_byte, one_byte]);
             out
         } else {
-            panic!("unsuported at initial version; nonce.len()=12 (96 bits)");
+            panic!("unsupported at initial version; nonce.len()=12 (96 bits)");
         };
 
         // 3. C=GCTR()
@@ -415,14 +414,12 @@ mod tests {
         },
     };
 
-    use super::*;
+    use super::{D, *};
     use crate::{
         circuit_aes::PartialWitnessByteArray,
         native_aes::key_expansion,
         native_gcm::{gctr, gf_2_128_mul, ghash, right_shift_one},
     };
-
-    use super::D;
 
     #[test]
     fn test_gctr() -> Result<()> {
@@ -435,8 +432,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_gctr_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -541,8 +538,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_gf_mul_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
@@ -599,8 +596,8 @@ mod tests {
 
         Ok(())
     }
-    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>(
-    ) -> Result<()>
+    fn test_ghash_opt<const NK: usize, const NB: usize, const NR: usize, const L: usize>()
+    -> Result<()>
     where
         [(); 4 * (NR + 1)]:,
         [(); NK * NB]:,
