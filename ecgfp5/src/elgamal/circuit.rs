@@ -79,7 +79,6 @@ impl PartialWitnessECGFP5PublicKey for PartialWitness<F> {
 
 #[cfg(test)]
 mod tests {
-    use num::BigUint;
     use num_bigint::RandBigInt;
     use plonky2::{
         iop::witness::PartialWitness,
@@ -98,11 +97,11 @@ mod tests {
     use rand::rngs::OsRng;
 
     use crate::elgamal::{
-        ECGFP5SecretKey, TOTAL_BITS,
+        ECGFP5SecretKey,
         circuit::{
             CircuitBuilderECGFP5PublicKey, CircuitBuilderElGamal, PartialWitnessECGFP5PublicKey,
         },
-        elgamal_decrypt, elgamal_encrypt,
+        elgamal_encrypt,
     };
 
     #[test]
