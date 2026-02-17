@@ -1,0 +1,12 @@
+[package]
+name = "plonky2-ecgfp5"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+plonky2 = { workspace = true }
+anyhow = { workspace = true }
+num = { version = "0.4.3", features = ["num-bigint"] }
+pod2 = { git = "https://github.com/0xPARC/pod2", rev = "cdf227e3530247e07e375daed007cae7d443b4ae" }
+num-bigint = { version = "0.4.6", features = ["rand"] }
+rand = "0.8.5"

@@ -1,8 +1,12 @@
 [workspace]
 members = [
-    "aes-gcm"
+    "aes-gcm",
+    "ecgfp5"
+	
 ]
 
 resolver = "2"
 
 [workspace.dependencies]
+plonky2 = { git = "https://github.com/0xPARC/plonky2.git", rev = "109d517d09c210ae4c2cee381d3e3fbc04aa3812" }
+anyhow = "1.0.56"
