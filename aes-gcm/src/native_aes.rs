@@ -217,8 +217,8 @@ mod tests {
     }
 
     use aes::{
-        cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit},
-        {Aes128, Aes192, Aes256},
+        Aes128, Aes192, Aes256,
+        cipher::{BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit, generic_array::GenericArray},
     };
     use rand::RngExt;
     /// test with loop of random-values against a rust well-tested library

@@ -36,7 +36,7 @@ where
         out[12..16].copy_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         out
     } else {
-        panic!("unsuported at initial version; nonce.len()=12 (96 bits)");
+        panic!("unsupported at initial version; nonce.len()=12 (96 bits)");
     };
 
     // 3. C=GCTR()
@@ -197,13 +197,13 @@ pub fn msb_t(t_bytes: usize, block: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use aes_gcm::{
-        aead::{Aead, KeyInit},
         Aes128Gcm, Aes256Gcm, Nonce,
+        aead::{Aead, KeyInit},
     };
     use rand::Rng;
+
+    use super::*;
 
     fn hex_to_array<const N: usize>(h: &str) -> [u8; N] {
         let bytes = hex::decode(h).unwrap();
@@ -266,8 +266,8 @@ mod tests {
         test_with_external_lib_op::<4, 4, 10, Aes128Gcm>()?;
         test_with_external_lib_op::<8, 4, 14, Aes256Gcm>()
     }
-    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>(
-    ) -> anyhow::Result<()>
+    fn test_with_external_lib_op<const NK: usize, const NB: usize, const NR: usize, C>()
+    -> anyhow::Result<()>
     where
         [(); NK * NB]:,
         [(); 4 * (NR + 1)]:,

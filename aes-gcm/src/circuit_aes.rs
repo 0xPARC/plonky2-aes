@@ -13,9 +13,9 @@ use plonky2::{
 };
 
 use crate::{
-    constants::{RCON, SBOX},
-    native_aes::{rot_word, shift_rows, State},
     D,
+    constants::{RCON, SBOX},
+    native_aes::{State, rot_word, shift_rows},
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -400,12 +400,10 @@ mod tests {
     use rand::RngExt;
 
     use super::{
-        sbox_lut, state_mix_matrix_bits, ByteArrayTarget, CircuitBuilderAESState,
-        PartialWitnessAESState, PartialWitnessByteArray,
+        ByteArrayTarget, CircuitBuilderAESState, D, PartialWitnessAESState,
+        PartialWitnessByteArray, sbox_lut, state_mix_matrix_bits,
     };
-    use crate::native_aes::{encrypt_block, key_expansion, mix_columns, sub_bytes, State};
-
-    use super::D;
+    use crate::native_aes::{State, encrypt_block, key_expansion, mix_columns, sub_bytes};
 
     #[test]
     fn test_sub_bytes() -> Result<()> {
