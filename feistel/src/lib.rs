@@ -7,6 +7,9 @@ use std::array;
 
 use plonky2::field::types::Field;
 
+/// Feistel-type cipher for finite fields, where XORing is replaced
+/// with addition, cf. https://en.wikipedia.org/wiki/Feistel_cipher or
+/// §3.5.1 of Stinson's Crytography (3rd edition).
 pub fn feistel_cipher<const STATE_HALF_LEN: usize, const KEY_LEN: usize, F: Field>(
     state: [F; 2 * STATE_HALF_LEN],
     key_schedule: &[[F; KEY_LEN]],
@@ -37,6 +40,8 @@ pub fn feistel_cipher<const STATE_HALF_LEN: usize, const KEY_LEN: usize, F: Fiel
     }
 }
 
+/// Feistel-type inverse cipher for finite fields, where XORing is
+/// replaced with subtraction.
 pub fn feistel_inv_cipher<const STATE_HALF_LEN: usize, const KEY_LEN: usize, F: Field>(
     state: [F; 2 * STATE_HALF_LEN],
     reverse_key_schedule: &[[F; KEY_LEN]],

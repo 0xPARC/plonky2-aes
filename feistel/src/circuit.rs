@@ -12,13 +12,16 @@ use plonky2::{
 
 pub(crate) const D: usize = 2;
 
+/// State on which the Feistel-like cipher operates
 #[derive(Debug, Copy, Clone)]
 pub struct FeistelStateTarget<const STATE_LEN: usize>([Target; STATE_LEN]);
 
 pub trait CircuitBuilderFeistel<F: RichField + Extendable<D>, const D: usize> {
+    /// Feistel state target constructor
     fn add_feistel_state_target<const STATE_LEN: usize>(&mut self)
     -> FeistelStateTarget<STATE_LEN>;
 
+    /// Generates Feistel-like cipher as in `crate::feistel_cipher`
     fn feistel_cipher<const STATE_HALF_LEN: usize, const KEY_LEN: usize>(
         &mut self,
         state: FeistelStateTarget<{ 2 * STATE_HALF_LEN }>,
@@ -66,6 +69,7 @@ impl CircuitBuilderFeistel<F, D> for CircuitBuilder<F, D> {
 }
 
 pub trait PartialWitnessFeistel {
+    /// Sets witnesses for a Feistel state target
     fn set_feistel_state_target<const STATE_SIZE: usize>(
         &mut self,
         target: &FeistelStateTarget<STATE_SIZE>,
