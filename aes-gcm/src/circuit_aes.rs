@@ -104,7 +104,7 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         x: [ByteTarget; N],
     ) -> [ByteTarget; M];
 
-    /// returns a 0u8 in the shape of a ByteArrayTarget.
+    /// returns a 0u8 in the shape of a ByteTarget.
     fn zero_byte(&mut self) -> ByteTarget;
 
     fn empty_state(&mut self) -> StateTarget;

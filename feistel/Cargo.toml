@@ -1,0 +1,9 @@
+[package]
+name = "plonky2-feistel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+plonky2 = { workspace = true }
+anyhow = { workspace = true }
+rand = "0.8.5"
