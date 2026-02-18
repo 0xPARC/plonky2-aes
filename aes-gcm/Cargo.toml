@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-plonky2 = { git = "https://github.com/0xPARC/plonky2.git", rev = "109d517d09c210ae4c2cee381d3e3fbc04aa3812" }
-anyhow = "1.0.56"
+plonky2 = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 rand = "0.10.0"
