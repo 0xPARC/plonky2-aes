@@ -12,7 +12,7 @@ use pod2::backends::plonky2::{
 
 use crate::ECGFP5SecretKey;
 
-/// EcGFp5 ecret key target type
+/// EcGFp5 secret key target type
 pub struct ECGFP5SecretKeyTarget(pub BigUInt320Target);
 
 /// EcGFp5 public key (point) type alias
