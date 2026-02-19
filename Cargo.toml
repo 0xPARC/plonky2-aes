@@ -1,8 +1,8 @@
 [workspace]
 members = [
     "aes-gcm",
-    "ecgfp5"
-	
+    "ecgfp5",
+    "feistel"
 ]
 
 resolver = "2"
