@@ -46,7 +46,8 @@ where
     [(); NK * NB]:,
     [(); 4 * (NR + 1)]:,
 {
-    pub fn new_virtual(builder: &mut CircuitBuilder<F, D>) -> Self {
+    pub fn build(builder: &mut CircuitBuilder<F, D>) -> Self {
+        // add targets
         let key: [ByteTarget; NK * NB] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
         let nonce: [ByteTarget; 12] =
@@ -54,27 +55,15 @@ where
         let pt: [ByteTarget; L] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
 
-        let ct: [ByteTarget; L] =
-            array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
         let tag: [ByteTarget; TAG_LEN / 8] =
             array::from_fn(|_| array::from_fn(|_| builder.add_virtual_bool_target_safe()));
 
-        Self {
-            key,
-            nonce,
-            pt,
-            ct,
-            tag,
-        }
-    }
-
-    pub fn build_circuit(&self, builder: &mut CircuitBuilder<F, D>) {
         let sbox_lut = sbox_lut(builder);
         let mix_matrix = state_mix_matrix_bits(builder);
 
         let a: &[ByteTarget] = &[]; // additional authenticated data
 
-        let expanded_key = builder.key_expansion::<NK, NB, NR>(sbox_lut, self.key);
+        let expanded_key = builder.key_expansion::<NK, NB, NR>(sbox_lut, key);
 
         let empty_state = builder.empty_state();
 
@@ -93,10 +82,10 @@ where
                 builder._false()
             }
         });
-        let j0: [ByteTarget; 16] = if self.nonce.len() * 8 == 96 {
+        let j0: [ByteTarget; 16] = if nonce.len() * 8 == 96 {
             // J_0 = IV || 0^31 || 1
             let mut out = [zero_byte; 16];
-            out[..12].copy_from_slice(self.nonce.as_slice());
+            out[..12].copy_from_slice(nonce.as_slice());
             out[12..16].copy_from_slice(&[zero_byte, zero_byte, zero_byte, one_byte]);
             out
         } else {
@@ -105,27 +94,18 @@ where
 
         // 3. C=GCTR()
         let inc32_j0 = inc32_target(builder, j0);
-        let c = gctr_target::<NR, L>(
-            builder,
-            sbox_lut,
-            mix_matrix,
-            expanded_key,
-            &inc32_j0,
-            &self.pt,
-        );
-
-        // connect the ct value to the external ct value
-        #[allow(clippy::needless_range_loop)]
-        for byte in 0..L {
-            for bit in 0..8 {
-                builder.connect(self.ct[byte][bit].target, c[byte][bit].target);
-            }
-        }
+        let ct = gctr_target::<NR, L>(builder, sbox_lut, mix_matrix, expanded_key, &inc32_j0, &pt);
 
         // the rest of the logic is for the tag; for some use cases we might skip it
         // (saving a notable amount of gates, about double)
         if !TAG {
-            return;
+            return Self {
+                key,
+                nonce,
+                pt,
+                ct,
+                tag,
+            };
         }
 
         // 4. u, v
@@ -134,7 +114,7 @@ where
 
         // 5. S = GHASH()
         let const_a_len_u8: [u8; 8] = (a.len() * 8).to_be_bytes(); // const
-        let const_c_len_u8: [u8; 8] = (c.len() * 8).to_be_bytes(); // const
+        let const_c_len_u8: [u8; 8] = (ct.len() * 8).to_be_bytes(); // const
         let a_len: [ByteTarget; 8] = array::from_fn(|byte_i| {
             let const_bits = le_bits_from_byte(const_a_len_u8[byte_i]);
             let byte: ByteTarget = array::from_fn(|bit_i| {
@@ -154,7 +134,7 @@ where
         let ghash_input_vec = [
             a.to_vec(),
             vec![zero_byte; v],
-            c.to_vec(),
+            ct.to_vec(),
             vec![zero_byte; u],
             a_len.to_vec(),
             c_len.to_vec(),
@@ -165,15 +145,20 @@ where
         // 6. T=MSB(GCTR()))
         let msb_input = gctr_target(builder, sbox_lut, mix_matrix, expanded_key, &j0, &s);
         let t_vec = msb_t_target(builder, TAG_LEN / 8, &msb_input);
-        let mut t: [ByteTarget; TAG_LEN / 8] = [zero_byte; TAG_LEN / 8];
-        t.copy_from_slice(&t_vec);
 
-        // connect the computed tag value to the external tag value
         #[allow(clippy::needless_range_loop)]
         for byte in 0..TAG_LEN / 8 {
             for bit in 0..8 {
-                builder.connect(self.tag[byte][bit].target, t[byte][bit].target);
+                builder.connect(tag[byte][bit].target, t_vec[byte][bit].target);
             }
+        }
+
+        Self {
+            key,
+            nonce,
+            pt,
+            ct,
+            tag,
         }
     }
 
@@ -203,7 +188,14 @@ where
         std::iter::zip(self.pt, pt_arr).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
 
         std::iter::zip(self.ct, ct_arr).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
-        std::iter::zip(self.tag, tag_arr).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        if TAG {
+            std::iter::zip(self.tag, tag_arr)
+                .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        } else {
+            self.tag
+                .iter()
+                .try_for_each(|t| pw.set_byte_array_target(*t, 0u8))?;
+        }
         Ok(())
     }
 }
@@ -643,6 +635,7 @@ mod tests {
 
         // AES-GCM-256
         test_encrypt_opt::<8, 4, 14, 13, false>(false)?;
+        test_encrypt_opt::<8, 4, 14, 13, true>(false)?; // with tag
 
         Ok(())
     }
@@ -699,8 +692,7 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let aes_targets = AesGcmTarget::<NK, NB, NR, L, TAG>::new_virtual(&mut builder);
-        aes_targets.build_circuit(&mut builder);
+        let aes_targets = AesGcmTarget::<NK, NB, NR, L, TAG>::build(&mut builder);
 
         println!(
             "encrypt (NK:{}, NB:{}, NR:{}, L:{}, TAG:{}) num_gates: {}",

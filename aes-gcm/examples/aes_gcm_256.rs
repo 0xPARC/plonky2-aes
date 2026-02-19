@@ -35,8 +35,7 @@ fn main() -> Result<()> {
     // circuit declaration
     let config = CircuitConfig::standard_recursion_zk_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
-    let aes_targets = AesGcm256Target::<L>::new_virtual(&mut builder);
-    aes_targets.build_circuit(&mut builder);
+    let aes_targets = AesGcm256Target::<L>::build(&mut builder);
 
     println!(
         "AES-GCM-256 circuit (L:{}) num_gates: {}",
