@@ -1,13 +1,16 @@
 //! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
+//!
+//! Implements the Plonky2 circuits for Poseidon encryption as described at
+//! https://drive.google.com/file/d/1EVrP3DzoGbmzkRmYnyEDcIQcXVU7GlOd/view .
 
 use std::array;
 
 use anyhow::Result;
 use plonky2::{
     field::{
-        extension::{FieldExtension, quintic::QuinticExtension},
+        extension::{quintic::QuinticExtension, FieldExtension},
         goldilocks_field::GoldilocksField as F,
-        types::Field,
+        types::{Field, Field64},
     },
     hash::poseidon::PoseidonHash,
     iop::{
@@ -24,7 +27,7 @@ use pod2::backends::plonky2::{
     },
 };
 
-use crate::{Fq, two_128};
+use crate::{Fq, TWO128};
 
 // Fq Target
 type FqT = OEFTarget<5, QuinticExtension<F>>;
@@ -35,7 +38,7 @@ where
 {
     ks: PointTarget,
     m: [FqT; L],
-    nonce: Target,
+    nonce: [Target; 2],
     ct: [FqT; L + 1],
 }
 
@@ -45,25 +48,25 @@ where
 {
     pub fn build(builder: &mut CircuitBuilder<F, D>) -> Self {
         assert!(L.is_multiple_of(3));
+        assert!(L < F::ORDER as usize);
         let fqt_zero = const_fqt_zero(builder);
 
         // add targets
         let ks: PointTarget = builder.add_virtual_point_target();
         let m: [FqT; L] = array::from_fn(|_| builder.add_virtual_nnf_target());
-        let nonce: Target = builder.add_virtual_target();
+        let nonce: [Target; 2] = builder.add_virtual_target_arr::<2>();
         let mut ct: [FqT; L + 1] = array::from_fn(|_| fqt_zero.clone());
 
         // build the circuit logic
         let f_zero = builder.constant(F::ZERO);
-        let n = FqT::new([nonce, f_zero, f_zero, f_zero, f_zero]);
-        let two128: Fq = two_128();
+        let n = FqT::new([nonce[0], nonce[1], f_zero, f_zero, f_zero]);
         let l_two128: Fq = Fq::from_basefield_array([
             F::from_canonical_u64(L as u64),
             F::ZERO,
             F::ZERO,
             F::ZERO,
             F::ZERO,
-        ]) * two128;
+        ]) * TWO128;
         let l_two128_target: FqT = const_fqt_from_fq(builder, l_two128);
         let nl128: FqT = builder.nnf_add(&n, &l_two128_target);
         let fq_zero: FqT = FqT::new([f_zero, f_zero, f_zero, f_zero, f_zero]);
@@ -93,7 +96,7 @@ where
         pw: &mut PartialWitness<F>,
         ks: Point,
         m: &[Fq],
-        nonce: F,
+        nonce: [F; 2],
         ct: &[Fq],
     ) -> Result<()> {
         assert_eq!(m.len(), L);
@@ -106,7 +109,7 @@ where
                 pw.set_target(self.m[i].components[j], m[i].0[j])?;
             }
         }
-        pw.set_target(self.nonce, nonce)?;
+        pw.set_target_arr(&self.nonce, &nonce)?;
         #[allow(clippy::needless_range_loop)]
         for i in 0..L + 1 {
             for j in 0..5 {
@@ -169,7 +172,7 @@ mod tests {
 
         let (_k, K) = crate::new_key();
         let ks = crate::expanded_key(K);
-        let nonce = F::rand();
+        let nonce: [F; 2] = [F::rand(), F::rand()];
         let msg: Vec<Fq> = (0..L).map(|_| Fq::sample(&mut rng)).collect();
         let l = msg.len();
 
