@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "aes-gcm",
+    "ecgfp5",
     "feistel"
 ]
 
