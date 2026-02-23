@@ -120,18 +120,8 @@ where
 
 fn hash_state_target(builder: &mut CircuitBuilder<F, D>, s: [FqT; 4]) -> [FqT; 4] {
     let elems: [Target; 4 * 5] = array::from_fn(|i| s[i / 5].components[i % 5]);
-    let h = builder
-        .hash_n_to_hash_no_pad::<PoseidonHash>(elems.to_vec())
-        .elements;
-    let mut h5: [Target; 5] = [builder.zero(); 5];
-    h5[..4].copy_from_slice(&h);
-    let fqt_zero = const_fqt_zero(builder);
-    [
-        FqT::new(h5),
-        fqt_zero.clone(),
-        fqt_zero.clone(),
-        fqt_zero.clone(),
-    ]
+    let h = builder.hash_n_to_m_no_pad::<PoseidonHash>(elems.to_vec(), 4 * 5);
+    array::from_fn(|i| FqT::new(array::from_fn::<_, 5, _>(|j| h[j + 5 * i])))
 }
 
 fn const_fqt_from_fq(builder: &mut CircuitBuilder<F, D>, fq: Fq) -> FqT {
