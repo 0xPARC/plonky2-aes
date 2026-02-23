@@ -1,4 +1,7 @@
 //! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
+//!
+//! Implements Poseidon encryption as described at
+//! https://drive.google.com/file/d/1EVrP3DzoGbmzkRmYnyEDcIQcXVU7GlOd/view .
 
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
@@ -48,13 +51,13 @@ pub(crate) fn two_128() -> Fq {
     two128
 }
 
-pub fn encrypt(ks: Point, msg: &[Fq], nonce: F) -> Vec<Fq> {
-    // pad m
-    let mut m = msg.to_vec();
+pub fn encrypt(ks: Point, msg: &[Fq], nonce: [F; 2]) -> Vec<Fq> {
+    let mut m = msg.to_vec(); // pad m
     m.resize(m.len().next_multiple_of(3), Fq::ZERO);
 
     let l = Fq::from(F::from_canonical_u64(msg.len() as u64));
-    let n = Fq::from(nonce);
+    let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
+    let n = Fq::from_basefield_array(nonce_5);
     let nl128: Fq = n + l * two_128();
     let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
 
@@ -77,9 +80,10 @@ pub fn encrypt(ks: Point, msg: &[Fq], nonce: F) -> Vec<Fq> {
     ct
 }
 
-pub fn decrypt(ks: Point, ct: &[Fq], nonce: F, l: usize) -> Vec<Fq> {
+pub fn decrypt(ks: Point, ct: &[Fq], nonce: [F; 2], l: usize) -> Vec<Fq> {
     let l_fq = Fq::from(F::from_canonical_u64(l as u64));
-    let n = Fq::from(nonce);
+    let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
+    let n = Fq::from_basefield_array(nonce_5);
     let nl128: Fq = n + l_fq * two_128();
     let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
 
@@ -113,6 +117,7 @@ pub fn decrypt(ks: Point, ct: &[Fq], nonce: F, l: usize) -> Vec<Fq> {
 
 fn hash_state(s: [Fq; 4]) -> [Fq; 4] {
     let elems: [F; 4 * 5] = array::from_fn(|i| s[i / 5].0[i % 5]);
+    // Note: here we're using plonky2's normal poseidon, not duplex-sponge
     let h = hash_n_to_m_no_pad::<F, PoseidonPermutation<_>>(&elems, 4 * 5);
     array::from_fn(|i| Fq::from_basefield_array(array::from_fn::<_, 5, _>(|j| h[j + 5 * i])))
 }
@@ -140,7 +145,7 @@ mod tests {
 
         let (_k, K) = new_key();
         let ks = expanded_key(K);
-        let nonce = F::rand();
+        let nonce: [F; 2] = [F::rand(), F::rand()];
         let msg: Vec<Fq> = (0..msg_len).map(|_| Fq::sample(&mut rng)).collect();
         let l = msg.len();
 
