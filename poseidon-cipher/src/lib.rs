@@ -16,7 +16,7 @@ use plonky2::{
     field::{
         extension::{FieldExtension, quintic::QuinticExtension},
         goldilocks_field::GoldilocksField as F,
-        types::Field,
+        types::{Field, Field64},
     },
     hash::{hashing::hash_n_to_m_no_pad, poseidon::PoseidonPermutation},
 };
@@ -38,27 +38,18 @@ pub fn expanded_key(K: Point) -> Point {
     &r * K
 }
 
-pub(crate) fn two_128() -> Fq {
-    // WIP TODO
-    let two32 = Fq::from(F::from_canonical_u64(2_u64.pow(32)));
-    // dbg!(2_u64.pow(32));
-    // dbg!(F::from_canonical_u64(2_u64.pow(32)));
-    // dbg!(&two32);
-    let two64: Fq = two32 * two32;
-    // dbg!(&two64);
-    let two128: Fq = two64 * two64;
-    // dbg!(&two128);
-    two128
-}
+pub(crate) const TWO128: Fq =
+    QuinticExtension::<F>([F(F::ORDER - 1), F(F::ORDER - 1), F::ZERO, F::ZERO, F::ZERO]);
 
 pub fn encrypt(ks: Point, msg: &[Fq], nonce: [F; 2]) -> Vec<Fq> {
     let mut m = msg.to_vec(); // pad m
     m.resize(m.len().next_multiple_of(3), Fq::ZERO);
+    assert!(m.len() < F::ORDER as usize);
 
     let l = Fq::from(F::from_canonical_u64(msg.len() as u64));
     let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
     let n = Fq::from_basefield_array(nonce_5);
-    let nl128: Fq = n + l * two_128();
+    let nl128: Fq = n + l * TWO128;
     let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
 
     let mut ct: Vec<Fq> = vec![Fq::ZERO; m.len() + 1];
@@ -84,7 +75,7 @@ pub fn decrypt(ks: Point, ct: &[Fq], nonce: [F; 2], l: usize) -> Vec<Fq> {
     let l_fq = Fq::from(F::from_canonical_u64(l as u64));
     let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
     let n = Fq::from_basefield_array(nonce_5);
-    let nl128: Fq = n + l_fq * two_128();
+    let nl128: Fq = n + l_fq * TWO128;
     let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
 
     let mut m: Vec<Fq> = vec![Fq::ZERO; ct.len() - 1];

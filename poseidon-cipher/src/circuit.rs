@@ -27,7 +27,7 @@ use pod2::backends::plonky2::{
     },
 };
 
-use crate::{Fq, two_128};
+use crate::{Fq, TWO128};
 
 // Fq Target
 type FqT = OEFTarget<5, QuinticExtension<F>>;
@@ -60,7 +60,7 @@ where
         // build the circuit logic
         let f_zero = builder.constant(F::ZERO);
         let n = FqT::new([nonce[0], nonce[1], f_zero, f_zero, f_zero]);
-        let two128: Fq = two_128();
+        let two128: Fq = TWO128;
         let l_two128: Fq = Fq::from_basefield_array([
             F::from_canonical_u64(L as u64),
             F::ZERO,
