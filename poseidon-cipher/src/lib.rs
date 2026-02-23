@@ -15,7 +15,7 @@ use plonky2::{
         goldilocks_field::GoldilocksField as F,
         types::Field,
     },
-    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonPermutation},
+    hash::{hashing::hash_n_to_m_no_pad, poseidon::PoseidonPermutation},
 };
 use pod2::backends::plonky2::primitives::ec::curve::{GROUP_ORDER, Point};
 use rand::rngs::OsRng;
@@ -88,9 +88,9 @@ pub fn decrypt(ks: Point, ct: &[Fq], nonce: F, l: usize) -> Vec<Fq> {
         s = hash_state(s);
 
         // release
-        m[3 * i] = s[1] + ct[3 * i];
-        m[3 * i + 1] = s[2] + ct[3 * i + 1];
-        m[3 * i + 2] = s[3] + ct[3 * i + 2];
+        m[3 * i] = ct[3 * i] - s[1];
+        m[3 * i + 1] = ct[3 * i + 1] - s[2];
+        m[3 * i + 2] = ct[3 * i + 2] - s[3];
 
         // modify state
         s[1] = ct[3 * i];
@@ -113,10 +113,8 @@ pub fn decrypt(ks: Point, ct: &[Fq], nonce: F, l: usize) -> Vec<Fq> {
 
 fn hash_state(s: [Fq; 4]) -> [Fq; 4] {
     let elems: [F; 4 * 5] = array::from_fn(|i| s[i / 5].0[i % 5]);
-    let h = hash_n_to_hash_no_pad::<F, PoseidonPermutation<_>>(&elems).elements;
-    let mut h5: [F; 5] = [F::ZERO; 5];
-    h5[..4].copy_from_slice(&h);
-    [Fq::from_basefield_array(h5), Fq::ZERO, Fq::ZERO, Fq::ZERO]
+    let h = hash_n_to_m_no_pad::<F, PoseidonPermutation<_>>(&elems, 4 * 5);
+    array::from_fn(|i| Fq::from_basefield_array(array::from_fn::<_, 5, _>(|j| h[j + 5 * i])))
 }
 
 #[cfg(test)]
@@ -150,5 +148,6 @@ mod tests {
 
         let m = decrypt(ks, &ct, nonce, l);
         assert_eq!(m, msg);
+        assert_ne!(&msg, &ct[..msg_len]);
     }
 }
