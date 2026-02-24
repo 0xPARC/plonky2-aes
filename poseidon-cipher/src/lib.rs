@@ -38,19 +38,20 @@ pub fn expanded_key(K: Point) -> Point {
     &r * K
 }
 
-pub(crate) const TWO128: Fq =
-    QuinticExtension::<F>([F(F::ORDER - 1), F(F::ORDER - 1), F::ZERO, F::ZERO, F::ZERO]);
-
 pub fn encrypt(ks: Point, msg: &[Fq], nonce: [F; 2]) -> Vec<Fq> {
     let mut m = msg.to_vec(); // pad m
     m.resize(m.len().next_multiple_of(3), Fq::ZERO);
     assert!(m.len() < F::ORDER as usize);
 
-    let l = Fq::from(F::from_canonical_u64(msg.len() as u64));
-    let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
-    let n = Fq::from_basefield_array(nonce_5);
-    let nl128: Fq = n + l * TWO128;
-    let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
+    // bind the msg length and nonce into the initial state
+    let n_l = Fq::from_basefield_array([
+        nonce[0],
+        nonce[1],
+        F::from_canonical_u64(msg.len() as u64),
+        F::ZERO,
+        F::ZERO,
+    ]);
+    let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, n_l];
 
     let mut ct: Vec<Fq> = vec![Fq::ZERO; m.len() + 1];
     for i in 0..m.len() / 3 {
@@ -72,11 +73,14 @@ pub fn encrypt(ks: Point, msg: &[Fq], nonce: [F; 2]) -> Vec<Fq> {
 }
 
 pub fn decrypt(ks: Point, ct: &[Fq], nonce: [F; 2], l: usize) -> Vec<Fq> {
-    let l_fq = Fq::from(F::from_canonical_u64(l as u64));
-    let nonce_5: [F; 5] = [nonce[0], nonce[1], F::ZERO, F::ZERO, F::ZERO];
-    let n = Fq::from_basefield_array(nonce_5);
-    let nl128: Fq = n + l_fq * TWO128;
-    let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, nl128];
+    let n_l = Fq::from_basefield_array([
+        nonce[0],
+        nonce[1],
+        F::from_canonical_u64(l as u64),
+        F::ZERO,
+        F::ZERO,
+    ]);
+    let mut s: [Fq; 4] = [Fq::ZERO, ks.x, ks.u, n_l];
 
     let mut m: Vec<Fq> = vec![Fq::ZERO; ct.len() - 1];
     for i in 0..ct.len() / 3 {

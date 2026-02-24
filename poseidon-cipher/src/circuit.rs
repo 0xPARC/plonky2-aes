@@ -8,7 +8,7 @@ use std::array;
 use anyhow::Result;
 use plonky2::{
     field::{
-        extension::{FieldExtension, quintic::QuinticExtension},
+        extension::quintic::QuinticExtension,
         goldilocks_field::GoldilocksField as F,
         types::{Field, Field64},
     },
@@ -27,7 +27,7 @@ use pod2::backends::plonky2::{
     },
 };
 
-use crate::{Fq, TWO128};
+use crate::Fq;
 
 // Fq Target
 type FqT = OEFTarget<5, QuinticExtension<F>>;
@@ -59,19 +59,15 @@ where
 
         // build the circuit logic
         let f_zero = builder.constant(F::ZERO);
-        let n = FqT::new([nonce[0], nonce[1], f_zero, f_zero, f_zero]);
-        let two128: Fq = TWO128;
-        let l_two128: Fq = Fq::from_basefield_array([
-            F::from_canonical_u64(L as u64),
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-        ]) * two128;
-        let l_two128_target: FqT = const_fqt_from_fq(builder, l_two128);
-        let nl128: FqT = builder.nnf_add(&n, &l_two128_target);
+        let n_l = FqT::new([
+            nonce[0],
+            nonce[1],
+            builder.constant(F::from_canonical_u64(L as u64)),
+            f_zero,
+            f_zero,
+        ]);
         let fq_zero: FqT = FqT::new([f_zero, f_zero, f_zero, f_zero, f_zero]);
-        let mut s: [FqT; 4] = [fq_zero, ks.x.clone(), ks.u.clone(), nl128];
+        let mut s: [FqT; 4] = [fq_zero, ks.x.clone(), ks.u.clone(), n_l];
 
         for i in 0..L / 3 {
             s = hash_state_target(builder, s);
