@@ -1,3 +1,5 @@
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
+
 use std::array;
 
 use num::bigint::BigUint;

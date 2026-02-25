@@ -1,3 +1,5 @@
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
+
 use num::bigint::BigUint;
 use pod2::backends::plonky2::primitives::ec::curve::{GROUP_ORDER, Point};
 
