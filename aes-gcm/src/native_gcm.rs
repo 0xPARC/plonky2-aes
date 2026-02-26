@@ -1,4 +1,4 @@
-//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
 //!
 //! Rust native implementation of [AES-GCM (Galois Counter
 //! Mode)](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
@@ -7,10 +7,10 @@
 //! simulating the behavior that we will do later inside the circuit.
 //!
 
-use crate::native_aes::{encrypt_block, flatten_state, key_expansion};
-
-// supported tag length
-const TAG_LEN: usize = 128;
+use crate::{
+    constants::TAG_LEN,
+    native_aes::{encrypt_block, flatten_state, key_expansion},
+};
 
 /// Section 7.1 from https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 pub fn encrypt<const NK: usize, const NB: usize, const NR: usize>(
@@ -21,7 +21,7 @@ pub fn encrypt<const NK: usize, const NB: usize, const NR: usize>(
 where
     [(); 4 * (NR + 1)]:,
 {
-    let a: &[u8] = &[]; // additional authenticated data // TODO maybe as input
+    let a: &[u8] = &[]; // additional authenticated data
     let expanded_key: [[u8; 4]; 4 * (NR + 1)] = key_expansion::<NK, NB, NR>(key);
 
     // 1. CIPH_K
@@ -43,6 +43,7 @@ where
     let c = gctr(expanded_key, &inc32(j0), pt);
 
     // 4. u, v
+    // note: c.len() will be x.len(), "L" in the circuit
     let u: usize = 16 * (c.len() as f64 / 16_f64).ceil() as usize - c.len();
     let v: usize = 16 * (a.len() as f64 / 16_f64).ceil() as usize - a.len();
 
@@ -67,7 +68,11 @@ where
 }
 
 /// GCM-Ctr, Section 6.5, Algorithm 3
-fn gctr<const NR: usize>(key: [[u8; 4]; 4 * (NR + 1)], icb: &[u8; 16], x: &[u8]) -> Vec<u8> {
+pub(crate) fn gctr<const NR: usize>(
+    key: [[u8; 4]; 4 * (NR + 1)],
+    icb: &[u8; 16],
+    x: &[u8],
+) -> Vec<u8> {
     if x.is_empty() {
         return x.to_vec();
     }
@@ -103,7 +108,7 @@ fn gctr<const NR: usize>(key: [[u8; 4]; 4 * (NR + 1)], icb: &[u8; 16], x: &[u8])
 }
 
 /// Section 6.4, Algorithm 2
-fn ghash(h: [u8; 16], x: &[u8]) -> [u8; 16] {
+pub(crate) fn ghash(h: [u8; 16], x: &[u8]) -> [u8; 16] {
     assert!(x.len().is_multiple_of(16)); // multiple of 128 bits
     let m = x.len() / 16;
 
@@ -151,7 +156,71 @@ pub fn gf_2_128_mul(x: [u8; 16], y: [u8; 16]) -> [u8; 16] {
     }
     z
 }
-fn right_shift_one(block: &mut [u8; 16]) {
+
+// auxiliary version for testing the circuit logic
+pub(crate) fn gf_2_128_mul_circuit_version(
+    x: [[bool; 8]; 16],
+    y: [[bool; 8]; 16],
+) -> [[bool; 8]; 16] {
+    let zero_byte = [false; 8];
+
+    // R: 10000111 || 0^120 (in little-endian)
+    let mut r = [zero_byte; 16];
+    r[0][0] = true;
+    r[0][5] = true;
+    r[0][6] = true;
+    r[0][7] = true;
+
+    let mut z = [zero_byte; 16];
+    let mut v = y;
+    for i in 0..128 {
+        let byte_index = i / 8;
+        let bit_index = 7 - (i % 8);
+        let xi = x[byte_index][bit_index];
+
+        // set z = if xi==1: z^v, else: z
+        for b in 0..16 {
+            for k in 0..8 {
+                let z_xor_v = z[b][k] ^ v[b][k];
+                z[b][k] = if xi { z_xor_v } else { z[b][k] };
+            }
+        }
+
+        let lsb = v[15][0]; // (little-endian)
+        v = right_shift_one_circuit_version(&v);
+
+        // if lsb==1: v=v^R, else: v
+        for b in 0..16 {
+            for k in 0..8 {
+                let v_xor_r = v[b][k] ^ r[b][k];
+                v[b][k] = if lsb { v_xor_r } else { v[b][k] };
+            }
+        }
+    }
+    z
+}
+// method for debugging
+fn bools_to_u8_le(bits: [bool; 8]) -> u8 {
+    bits.iter()
+        .enumerate()
+        .fold(0u8, |acc, (i, &bit)| if bit { acc | (1 << i) } else { acc })
+}
+fn right_shift_one_circuit_version(v: &[[bool; 8]; 16]) -> [[bool; 8]; 16] {
+    let mut r: [[bool; 8]; 16] = *v;
+    let mut carry = false;
+    for i in 0..16 {
+        let current = v[i];
+        let next_carry = current[0];
+        let mut shifted = [false; 8];
+        shifted[..7].copy_from_slice(&current[1..(7 + 1)]);
+        shifted[7] = carry;
+        r[i] = shifted;
+        carry = next_carry;
+    }
+    r
+}
+
+pub(crate) fn right_shift_one(block: &mut [u8; 16]) {
     let mut carry = 0u8;
 
     for byte in block.iter_mut() {
@@ -162,7 +231,7 @@ fn right_shift_one(block: &mut [u8; 16]) {
 }
 
 /// increment the right-most 32 bits of the given block (128 bits). Section 2.
-pub fn inc32(b: [u8; 16]) -> [u8; 16] {
+pub(crate) fn inc32(b: [u8; 16]) -> [u8; 16] {
     let mut r = b;
     // counter = last 32bits
     let counter = u32::from_be_bytes([r[12], r[13], r[14], r[15]]);
@@ -173,7 +242,7 @@ pub fn inc32(b: [u8; 16]) -> [u8; 16] {
 }
 
 /// returns the t left-most (most-significant in BE) bits of the block
-pub fn msb_t(t_bytes: usize, block: &[u8]) -> Vec<u8> {
+pub(crate) fn msb_t(t_bytes: usize, block: &[u8]) -> Vec<u8> {
     let t = t_bytes * 8;
 
     let mut out = Vec::with_capacity(t.div_ceil(8));

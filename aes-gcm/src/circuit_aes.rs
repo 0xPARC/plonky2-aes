@@ -1,4 +1,7 @@
-//! For LICENSE check out https://github.com/0xPARC/plonky2-aes/blob/main/LICENSE
+//! For LICENSE check out https://github.com/0xPARC/plonky2-crypto-gadgets/blob/main/LICENSE
+//!
+//! Plonky2 circuit implementation of
+//! [AES](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf).
 
 use std::{array, sync::Arc};
 
@@ -19,10 +22,20 @@ use crate::{
 };
 
 #[derive(Debug, Copy, Clone)]
-pub struct StateTarget(pub [[ByteArrayTarget; 4]; 4]);
+pub struct StateTarget(pub [[ByteTarget; 4]; 4]);
 
-// TODO: Normalise terminology!
-pub type ByteArrayTarget = Target;
+impl StateTarget {
+    pub(crate) fn flatten(self) -> [ByteTarget; 16] {
+        array::from_fn(|i| self.0[i % 4][i / 4])
+    }
+
+    pub(crate) fn from_flat(b: [ByteTarget; 16]) -> Self {
+        StateTarget(array::from_fn(|i| array::from_fn(|j| b[j * 4 + i])))
+    }
+}
+
+/// Type alias for byte targets
+pub type ByteTarget = Target;
 
 pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     /// Adds state target.
@@ -34,9 +47,9 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
         sbox_lut_idx: usize,
-        mix_matrix: [[ByteArrayTarget; 4]; 4], // constant mix_matrix
+        mix_matrix: [[ByteTarget; 4]; 4], // constant mix_matrix
         s: StateTarget,
-        w: [[ByteArrayTarget; 4]; 4 * (NR + 1)], // expanded key
+        w: [[ByteTarget; 4]; 4 * (NR + 1)], // expanded key
     ) -> StateTarget {
         let mut s = s;
         s = self.state_add_round_key(xor_lut_idx, &w[0..4], s);
@@ -59,18 +72,14 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     }
 
     /// SubWord
-    fn state_sub_word(
-        &mut self,
-        sbox_lut_idx: usize,
-        word: [ByteArrayTarget; 4],
-    ) -> [ByteArrayTarget; 4];
+    fn state_sub_word(&mut self, sbox_lut_idx: usize, word: [ByteTarget; 4]) -> [ByteTarget; 4];
 
     /// MixColumns
     fn state_mix_columns(
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
-        mix_matrix: [[ByteArrayTarget; 4]; 4],
+        mix_matrix: [[ByteTarget; 4]; 4],
         s: StateTarget,
     ) -> StateTarget {
         let cols: [_; 4] = array::from_fn(|i| array::from_fn(|j| s.0[j][i]));
@@ -84,7 +93,7 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     fn state_add_round_key(
         &mut self,
         xor_lut_idx: usize,
-        round_key: &[[ByteArrayTarget; 4]],
+        round_key: &[[ByteTarget; 4]],
         s: StateTarget,
     ) -> StateTarget {
         StateTarget(array::from_fn(|i| {
@@ -97,8 +106,8 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         &mut self,
         xor_lut_idx: usize,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; NK * NB],
-    ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)];
+        key: [ByteTarget; NK * NB],
+    ) -> [[ByteTarget; 4]; 4 * (NR + 1)];
 
     /// GF(2^8) addition
     fn gf_2_8_add(&mut self, xor_lut_idx: usize, x: Target, y: Target) -> Target;
@@ -111,20 +120,25 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
-        x: [ByteArrayTarget; N],
-        y: [ByteArrayTarget; N],
-    ) -> ByteArrayTarget;
+        x: [ByteTarget; N],
+        y: [ByteTarget; N],
+    ) -> ByteTarget;
 
     /// Bytearray matrix application.
     fn bytearray_matrix_apply_bits<const M: usize, const N: usize>(
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
-        a: [[ByteArrayTarget; N]; M],
-        x: [ByteArrayTarget; N],
-    ) -> [ByteArrayTarget; M] {
+        a: [[ByteTarget; N]; M],
+        x: [ByteTarget; N],
+    ) -> [ByteTarget; M] {
         std::array::from_fn(|i| self.bytearray_ip_bits(xor_lut_idx, gf_2_8_mul_lut_idx, a[i], x))
     }
+
+    /// returns a 0u8 in the shape of a ByteTarget.
+    fn zero_byte(&mut self) -> ByteTarget;
+
+    fn empty_state(&mut self) -> StateTarget;
 }
 
 impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
@@ -134,11 +148,7 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         }))
     }
 
-    fn state_sub_word(
-        &mut self,
-        sbox_lut_idx: usize,
-        word: [ByteArrayTarget; 4],
-    ) -> [ByteArrayTarget; 4] {
+    fn state_sub_word(&mut self, sbox_lut_idx: usize, word: [ByteTarget; 4]) -> [ByteTarget; 4] {
         array::from_fn(|i| {
             let byte_target = word[i];
 
@@ -150,9 +160,9 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         &mut self,
         xor_lut_idx: usize,
         sbox_lut_idx: usize,
-        key: [ByteArrayTarget; NK * NB],
-    ) -> [[ByteArrayTarget; 4]; 4 * (NR + 1)] {
-        let rcon: [ByteArrayTarget; 11] =
+        key: [ByteTarget; NK * NB],
+    ) -> [[ByteTarget; 4]; 4 * (NR + 1)] {
+        let rcon: [ByteTarget; 11] =
             array::from_fn(|i| self.constant(F::from_canonical_u8(RCON[i])));
 
         let key: [[_; 4]; NK] = array::from_fn(|i| array::from_fn(|j| key[4 * i + j]));
@@ -202,23 +212,32 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
-        x: [ByteArrayTarget; N],
-        y: [ByteArrayTarget; N],
-    ) -> ByteArrayTarget {
+        x: [ByteTarget; N],
+        y: [ByteTarget; N],
+    ) -> ByteTarget {
         let zero = self.zero();
         std::iter::zip(x, y).fold(zero, |acc, (a, b)| {
             let prod = self.gf_2_8_mul(gf_2_8_mul_lut_idx, a, b);
             self.gf_2_8_add(xor_lut_idx, acc, prod)
         })
     }
+
+    fn zero_byte(&mut self) -> ByteTarget {
+        self.zero()
+    }
+
+    fn empty_state(&mut self) -> StateTarget {
+        let zero_byte: ByteTarget = self.zero_byte();
+        StateTarget(array::from_fn(|_| array::from_fn(|_| zero_byte)))
+    }
 }
 
 pub trait PartialWitnessByteArray {
-    fn set_byte_array_target(&mut self, target: ByteArrayTarget, value: u8) -> anyhow::Result<()>;
+    fn set_byte_array_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()>;
 }
 
 impl<F: Field> PartialWitnessByteArray for PartialWitness<F> {
-    fn set_byte_array_target(&mut self, target: ByteArrayTarget, value: u8) -> anyhow::Result<()> {
+    fn set_byte_array_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()> {
         self.set_target(target, F::from_canonical_u8(value))
     }
 }
@@ -273,7 +292,7 @@ pub fn gf_2_8_mul_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
     builder.add_lookup_table_from_pairs(Arc::new(gf_2_8_mul_table))
 }
 
-pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[ByteArrayTarget; 4]; 4] {
+pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[ByteTarget; 4]; 4] {
     let one = builder.one();
     let two = builder.two();
     let three = builder.constant(F::from_canonical_u64(3));
@@ -289,9 +308,9 @@ pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[ByteArrayT
 pub fn byte_xor(
     builder: &mut CircuitBuilder<F, D>,
     xor_lut_idx: usize,
-    x: ByteArrayTarget,
-    y: ByteArrayTarget,
-) -> ByteArrayTarget {
+    x: ByteTarget,
+    y: ByteTarget,
+) -> ByteTarget {
     let lookup_idx = builder.mul_const_add(F::from_canonical_u64(1 << 8), x, y);
     builder.add_lookup_from_index(lookup_idx, xor_lut_idx)
 }
@@ -311,7 +330,10 @@ mod tests {
     };
     use rand::RngExt;
 
-    use super::*;
+    use super::{
+        ByteTarget, CircuitBuilderAESState, D, PartialWitnessAESState, PartialWitnessByteArray,
+        byte_xor_lut, gf_2_8_mul_lut, sbox_lut, state_mix_matrix_bits,
+    };
     use crate::native_aes::{State, encrypt_block, key_expansion, mix_columns, sub_bytes};
 
     #[test]
@@ -501,8 +523,7 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteArrayTarget; NK * NB] =
-            array::from_fn(|_| builder.add_virtual_target());
+        let key_target: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
         let xor_lut_idx = byte_xor_lut(&mut builder);
         let sbox_lut_idx = sbox_lut(&mut builder);
         let expanded_key_target =
@@ -585,13 +606,12 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteArrayTarget; NK * NB] =
-            array::from_fn(|_| builder.add_virtual_target());
+        let key_target: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
         let xor_lut_idx = byte_xor_lut(&mut builder);
         let gf_2_8_mul_lut_idx = gf_2_8_mul_lut(&mut builder);
         let sbox_lut_idx = sbox_lut(&mut builder);
         let mix_matrix = state_mix_matrix_bits(&mut builder);
-        let expanded_key_target: [[ByteArrayTarget; 4]; 4 * (NR + 1)] =
+        let expanded_key_target: [[ByteTarget; 4]; 4 * (NR + 1)] =
             builder.key_expansion::<NK, NB, NR>(xor_lut_idx, sbox_lut_idx, key_target);
 
         let input_state_target = builder.add_virtual_state();
