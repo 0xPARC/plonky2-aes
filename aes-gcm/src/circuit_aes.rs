@@ -297,9 +297,9 @@ pub fn sbox_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
 }
 
 pub fn byte_xor_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
-    let xor_table: Vec<(u16, u16)> = (0..u8::MAX as usize)
+    let xor_table: Vec<(u16, u16)> = (0..=u8::MAX as usize)
         .flat_map(|x| {
-            (0..u8::MAX as usize)
+            (0..=u8::MAX as usize)
                 .map(|y| (((x as u16) << 8) + y as u16, (x as u16) ^ (y as u16)))
                 .collect::<Vec<_>>()
         })
@@ -308,9 +308,9 @@ pub fn byte_xor_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
 }
 
 pub fn byte_and_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
-    let and_table: Vec<(u16, u16)> = (0..u8::MAX as usize)
+    let and_table: Vec<(u16, u16)> = (0..=u8::MAX as usize)
         .flat_map(|x| {
-            (0..u8::MAX as usize)
+            (0..=u8::MAX as usize)
                 .map(|y| (((x as u16) << 8) + y as u16, (x as u16) & (y as u16)))
                 .collect::<Vec<_>>()
         })
@@ -319,7 +319,7 @@ pub fn byte_and_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
 }
 
 pub fn byte_x_times_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
-    let x_times_table: Vec<(u16, u16)> = (0..u8::MAX as usize)
+    let x_times_table: Vec<(u16, u16)> = (0..=u8::MAX as usize)
         .map(|y| {
             (
                 y as u16,
