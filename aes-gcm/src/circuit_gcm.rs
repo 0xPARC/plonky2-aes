@@ -16,7 +16,7 @@ use crate::{
     D,
     circuit_aes::{
         ByteTarget, CircuitBuilderAESState, PartialWitnessByteArray, StateTarget, byte_xor,
-        byte_xor_lut, gf_2_8_mul_lut, sbox_lut, state_mix_matrix_bits,
+        byte_xor_lut, gf_2_8_mul_lut, sbox_lut, state_mix_matrix,
     },
     constants::TAG_LEN,
 };
@@ -47,17 +47,21 @@ where
     [(); 4 * (NR + 1)]:,
 {
     pub fn build(builder: &mut CircuitBuilder<F, D>) -> Self {
-        // add targets
-        let key: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
-        let nonce: [ByteTarget; 12] = array::from_fn(|_| builder.add_virtual_target());
-        let pt: [ByteTarget; L] = array::from_fn(|_| builder.add_virtual_target());
-
-        let tag: [ByteTarget; TAG_LEN / 8] = array::from_fn(|_| builder.add_virtual_target());
-
+        // Declare LUTs
         let sbox_lut = sbox_lut(builder);
         let xor_lut = byte_xor_lut(builder);
         let gf_2_8_mul_lut = gf_2_8_mul_lut(builder);
-        let mix_matrix = state_mix_matrix_bits(builder);
+
+        // add targets
+        let key: [ByteTarget; NK * NB] =
+            array::from_fn(|_| builder.add_virtual_byte_target(sbox_lut));
+        let nonce: [ByteTarget; 12] = array::from_fn(|_| builder.add_virtual_byte_target(sbox_lut));
+        let pt: [ByteTarget; L] = array::from_fn(|_| builder.add_virtual_byte_target(sbox_lut));
+
+        let tag: [ByteTarget; TAG_LEN / 8] =
+            array::from_fn(|_| builder.add_virtual_byte_target(sbox_lut));
+
+        let mix_matrix = state_mix_matrix(builder);
 
         let a: &[ByteTarget] = &[]; // additional authenticated data
 
@@ -79,7 +83,7 @@ where
 
         // 2. J_0
         let zero_byte = builder.zero_byte();
-        let one_byte = builder.one();
+        let one_byte = builder.byte_constant(1);
         let j0: [ByteTarget; 16] = if nonce.len() * 8 == 96 {
             // J_0 = IV || 0^31 || 1
             let mut out = [zero_byte; 16];
@@ -121,9 +125,9 @@ where
         let const_a_len_u8: [u8; 8] = (a.len() * 8).to_be_bytes(); // const
         let const_c_len_u8: [u8; 8] = (ct.len() * 8).to_be_bytes(); // const
         let a_len: [ByteTarget; 8] =
-            array::from_fn(|byte_i| builder.constant(F::from_canonical_u8(const_a_len_u8[byte_i])));
+            array::from_fn(|byte_i| builder.byte_constant(const_a_len_u8[byte_i]));
         let c_len: [ByteTarget; 8] =
-            array::from_fn(|byte_i| builder.constant(F::from_canonical_u8(const_c_len_u8[byte_i])));
+            array::from_fn(|byte_i| builder.byte_constant(const_c_len_u8[byte_i]));
         let ghash_input_vec = [
             a.to_vec(),
             vec![zero_byte; v],
@@ -156,7 +160,7 @@ where
         );
         let t_vec = msb_t_target(TAG_LEN / 8, &msb_input);
 
-        std::iter::zip(tag, t_vec).for_each(|(a, b)| builder.connect(a, b));
+        std::iter::zip(tag, t_vec).for_each(|(a, b)| builder.connect(a.0, b.0));
 
         Self {
             key,
@@ -188,18 +192,17 @@ where
         let mut tag_arr: [u8; TAG_LEN / 8] = [0u8; TAG_LEN / 8];
         tag_arr.copy_from_slice(tag);
 
-        std::iter::zip(self.key, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
-        std::iter::zip(self.nonce, nonce).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
-        std::iter::zip(self.pt, pt_arr).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(self.key, key).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
+        std::iter::zip(self.nonce, nonce).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
+        std::iter::zip(self.pt, pt_arr).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
-        std::iter::zip(self.ct, ct_arr).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(self.ct, ct_arr).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
         if TAG {
-            std::iter::zip(self.tag, tag_arr)
-                .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+            std::iter::zip(self.tag, tag_arr).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
         } else {
             self.tag
                 .iter()
-                .try_for_each(|t| pw.set_byte_array_target(*t, 0u8))?;
+                .try_for_each(|t| pw.set_byte_target(*t, 0u8))?;
         }
         Ok(())
     }
@@ -292,37 +295,32 @@ fn gf_2_128_mul_target(
     x: [ByteTarget; 16],
     y: [ByteTarget; 16],
 ) -> [ByteTarget; 16] {
-    let zero = builder.zero();
+    let zero = builder.zero_byte();
 
     // R: 10000111 (= 225) || 0^120 (in little-endian)
-    let r_first = builder.constant(F::from_canonical_u8(225));
+    let r_first = builder.byte_constant(225);
 
     let mut z = [zero; 16];
     let mut v = y;
     for i in 0..128 {
         let byte_index = i / 8;
         let bit_index = 7 - (i % 8);
-        let bit_idx_target = builder.constant(F::from_canonical_usize(bit_index));
-        let xi = BoolTarget::new_unsafe(u8_bitref(
-            builder,
-            u8_bitref_lut_idx,
-            x[byte_index],
-            bit_idx_target,
-        ));
+        let bit_idx_target = builder.byte_constant(bit_index as u8);
+        let xi = u8_bitref(builder, u8_bitref_lut_idx, x[byte_index], bit_idx_target);
 
         // set z = if xi==1: z^v, else: z
         for b in 0..16 {
             let z_xor_v = byte_xor(builder, xor_lut_idx, z[b], v[b]);
-            z[b] = builder.select(xi, z_xor_v, z[b]);
+            z[b] = ByteTarget(builder.select(xi, z_xor_v.0, z[b].0));
         }
 
-        let lsb = BoolTarget::new_unsafe(u8_bitref(builder, u8_bitref_lut_idx, v[15], zero)); // (little-endian)
+        let lsb = u8_bitref(builder, u8_bitref_lut_idx, v[15], zero); // (little-endian)
 
         v = right_shift_one_target(builder, u8_unit_right_shift_lut_idx, &v);
 
         // if lsb==1: v=v^R, else: v
         let v_xor_r = byte_xor(builder, xor_lut_idx, v[0], r_first);
-        v[0] = builder.select(lsb, v_xor_r, v[0]);
+        v[0] = ByteTarget(builder.select(lsb, v_xor_r.0, v[0].0));
     }
     z
 }
@@ -338,9 +336,10 @@ pub fn right_shift_one_target(
         let current = v[i];
         let mut shifted = u8_unit_right_shift(builder, u8_unit_right_shift_lut_idx, current);
         let next_carry =
-            builder.mul_const_add(F::from_canonical_u64(2) * F::NEG_ONE, shifted, current);
+            builder.mul_const_add(F::from_canonical_u64(2) * F::NEG_ONE, shifted.0, current.0);
 
-        shifted = builder.mul_const_add(F::from_canonical_u64(1 << 7), carry, shifted);
+        shifted =
+            ByteTarget(builder.mul_const_add(F::from_canonical_u64(1 << 7), carry, shifted.0));
 
         r[i] = shifted;
         carry = next_carry;
@@ -359,10 +358,10 @@ pub fn inc32_target(
     let mut carry = builder.one();
     for byte_index in (12..16).rev() {
         let a = block[byte_index];
-        let sum = builder.add(a, carry);
-        let a_is_u8_max = builder.is_equal(a, u8_max);
+        let sum = builder.add(a.0, carry);
+        let a_is_u8_max = builder.is_equal(a.0, u8_max);
         let carry_out = builder.mul(carry, a_is_u8_max.target);
-        r[byte_index] = builder.select(a_is_u8_max, zero, sum);
+        r[byte_index] = ByteTarget(builder.select(a_is_u8_max, zero, sum));
         carry = carry_out;
     }
     r
@@ -401,7 +400,7 @@ pub fn u8_unit_right_shift(
     u8_unit_right_shift_lut_idx: usize,
     x: ByteTarget,
 ) -> ByteTarget {
-    builder.add_lookup_from_index(x, u8_unit_right_shift_lut_idx)
+    ByteTarget(builder.add_lookup_from_index(x.0, u8_unit_right_shift_lut_idx))
 }
 
 /// Lookup table for u8 bit referencing.
@@ -420,9 +419,9 @@ pub fn u8_bitref(
     u8_bitref_lut_idx: usize,
     x: ByteTarget,
     i: ByteTarget,
-) -> ByteTarget {
-    let lookup_idx = builder.mul_const_add(F::from_canonical_u64(8), x, i);
-    builder.add_lookup_from_index(lookup_idx, u8_bitref_lut_idx)
+) -> BoolTarget {
+    let lookup_idx = builder.mul_const_add(F::from_canonical_u64(8), x.0, i.0);
+    BoolTarget::new_unsafe(builder.add_lookup_from_index(lookup_idx, u8_bitref_lut_idx))
 }
 
 fn le_bits_from_byte(v: u8) -> [bool; 8] {
@@ -486,14 +485,18 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
-        let nonce_target: [ByteTarget; 12] = array::from_fn(|_| builder.add_virtual_target());
-        let icb_target: [ByteTarget; 16] = array::from_fn(|_| builder.add_virtual_target());
-        let pt_target: [ByteTarget; L] = array::from_fn(|_| builder.add_virtual_target());
+        let key_target: [ByteTarget; NK * NB] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
+        let nonce_target: [ByteTarget; 12] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
+        let icb_target: [ByteTarget; 16] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
+        let pt_target: [ByteTarget; L] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
         let sbox_lut = sbox_lut(&mut builder);
         let xor_lut = byte_xor_lut(&mut builder);
         let gf_2_8_mul_lut = gf_2_8_mul_lut(&mut builder);
-        let mix_matrix = state_mix_matrix_bits(&mut builder);
+        let mix_matrix = state_mix_matrix(&mut builder);
 
         let key_expanded_target =
             builder.key_expansion::<NK, NB, NR>(xor_lut, sbox_lut, key_target);
@@ -518,14 +521,13 @@ mod tests {
 
         // set values to circuit
         let mut pw = PartialWitness::<F>::new();
-        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
-        std::iter::zip(nonce_target, nonce)
-            .try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
-        std::iter::zip(icb_target, icb).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
-        std::iter::zip(pt_target, pt).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
+        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
+        std::iter::zip(nonce_target, nonce).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
+        std::iter::zip(icb_target, icb).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
+        std::iter::zip(pt_target, pt).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
 
         std::iter::zip(gctr_out_target, expected)
-            .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+            .try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
         let proof = data.prove(pw)?;
         data.verify(proof)
@@ -544,7 +546,8 @@ mod tests {
 
         let u8_unit_right_shift_lut_idx = u8_unit_right_shift_lut(&mut builder);
 
-        let x_target: [ByteTarget; 16] = array::from_fn(|_| builder.add_virtual_target());
+        let x_target: [ByteTarget; 16] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
 
         let out_target: [ByteTarget; 16] =
             right_shift_one_target(&mut builder, u8_unit_right_shift_lut_idx, &x_target);
@@ -554,10 +557,9 @@ mod tests {
 
         // set values to circuit
         let mut pw = PartialWitness::<F>::new();
-        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
-        std::iter::zip(out_target, expected)
-            .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(out_target, expected).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
         let proof = data.prove(pw)?;
         data.verify(proof)?;
@@ -601,8 +603,10 @@ mod tests {
         let u8_unit_right_shift_lut_idx = u8_unit_right_shift_lut(&mut builder);
         let u8_bitref_lut_idx = u8_bitref_lut(&mut builder);
 
-        let x_target: [ByteTarget; 16] = array::from_fn(|_| builder.add_virtual_target());
-        let y_target: [ByteTarget; 16] = array::from_fn(|_| builder.add_virtual_target());
+        let x_target: [ByteTarget; 16] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
+        let y_target: [ByteTarget; 16] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
 
         let out_target = gf_2_128_mul_target(
             &mut builder,
@@ -618,11 +622,10 @@ mod tests {
 
         // set values to circuit
         let mut pw = PartialWitness::<F>::new();
-        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
-        std::iter::zip(y_target, y).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
+        std::iter::zip(y_target, y).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
-        std::iter::zip(out_target, expected)
-            .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(out_target, expected).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
         let proof = data.prove(pw)?;
         data.verify(proof)
@@ -658,8 +661,10 @@ mod tests {
         let u8_unit_right_shift_lut_idx = u8_unit_right_shift_lut(&mut builder);
         let u8_bitref_lut_idx = u8_bitref_lut(&mut builder);
 
-        let h_target: [ByteTarget; 16] = array::from_fn(|_| builder.add_virtual_target());
-        let x_target: [ByteTarget; L] = array::from_fn(|_| builder.add_virtual_target());
+        let h_target: [ByteTarget; 16] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
+        let x_target: [ByteTarget; L] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
 
         // let ghash_out_target = ghash_target::<L>(&mut builder, h_target, &x_target);
         let ghash_out_target = ghash_target(
@@ -676,11 +681,11 @@ mod tests {
 
         // set values to circuit
         let mut pw = PartialWitness::<F>::new();
-        std::iter::zip(h_target, h).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
-        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_array_target(t, *v))?;
+        std::iter::zip(h_target, h).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
+        std::iter::zip(x_target, x).try_for_each(|(t, v)| pw.set_byte_target(t, *v))?;
 
         std::iter::zip(ghash_out_target, expected)
-            .try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+            .try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
         let proof = data.prove(pw)?;
         data.verify(proof)

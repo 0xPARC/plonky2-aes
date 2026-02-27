@@ -34,12 +34,43 @@ impl StateTarget {
     }
 }
 
-/// Type alias for byte targets
-pub type ByteTarget = Target;
+/// Type for byte targets
+#[derive(Debug, Copy, Clone)]
+pub struct ByteTarget(pub(crate) Target);
 
 pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
-    /// Adds state target.
-    fn add_virtual_state(&mut self) -> StateTarget;
+    /// Adds byte target (unsafe).
+    fn add_virtual_byte_target_unsafe(&mut self) -> ByteTarget;
+
+    /// Adds byte target safely assuming an appropriate lookup table
+    /// (see `assert_byte`).
+    fn add_virtual_byte_target(&mut self, u8_table_idx: usize) -> ByteTarget {
+        let byte_target = self.add_virtual_byte_target_unsafe();
+        self.assert_byte(byte_target.0, u8_table_idx);
+        byte_target
+    }
+
+    /// Asserts that a given target is a byte.
+    /// Requires a lookup table of the form {(x, y): x ∈ u8}.
+    fn assert_byte(&mut self, x: Target, u8_table_idx: usize);
+
+    /// Adds byte constant
+    fn byte_constant(&mut self, c: u8) -> ByteTarget;
+
+    /// Adds state target (unsafe).
+    fn add_virtual_state_target_unsafe(&mut self) -> StateTarget {
+        StateTarget(array::from_fn(|_| {
+            array::from_fn(|_| self.add_virtual_byte_target_unsafe())
+        }))
+    }
+
+    /// Adds state target under the same assumptions as
+    /// `add_virtual_byte_target`.
+    fn add_virtual_state_target(&mut self, u8_table_idx: usize) -> StateTarget {
+        StateTarget(array::from_fn(|_| {
+            array::from_fn(|_| self.add_virtual_byte_target(u8_table_idx))
+        }))
+    }
 
     /// AES cipher as in spec.
     fn encrypt_block<const NR: usize>(
@@ -84,7 +115,7 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     ) -> StateTarget {
         let cols: [_; 4] = array::from_fn(|i| array::from_fn(|j| s.0[j][i]));
         let out_cols: [_; 4] = array::from_fn(|i| {
-            self.bytearray_matrix_apply_bits(xor_lut_idx, gf_2_8_mul_lut_idx, mix_matrix, cols[i])
+            self.byte_matrix_apply(xor_lut_idx, gf_2_8_mul_lut_idx, mix_matrix, cols[i])
         });
         StateTarget(array::from_fn(|i| array::from_fn(|j| out_cols[j][i])))
     }
@@ -110,13 +141,14 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
     ) -> [[ByteTarget; 4]; 4 * (NR + 1)];
 
     /// GF(2^8) addition
-    fn gf_2_8_add(&mut self, xor_lut_idx: usize, x: Target, y: Target) -> Target;
+    fn gf_2_8_add(&mut self, xor_lut_idx: usize, x: ByteTarget, y: ByteTarget) -> ByteTarget;
 
     /// GF(2^8) multiplication
-    fn gf_2_8_mul(&mut self, gf_2_8_mul_lut_idx: usize, x: Target, y: Target) -> Target;
+    fn gf_2_8_mul(&mut self, gf_2_8_mul_lut_idx: usize, x: ByteTarget, y: ByteTarget)
+    -> ByteTarget;
 
     /// Bytearray inner product.
-    fn bytearray_ip_bits<const N: usize>(
+    fn bytearray_ip<const N: usize>(
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
@@ -124,15 +156,15 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
         y: [ByteTarget; N],
     ) -> ByteTarget;
 
-    /// Bytearray matrix application.
-    fn bytearray_matrix_apply_bits<const M: usize, const N: usize>(
+    /// Byte matrix application.
+    fn byte_matrix_apply<const M: usize, const N: usize>(
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
         a: [[ByteTarget; N]; M],
         x: [ByteTarget; N],
     ) -> [ByteTarget; M] {
-        std::array::from_fn(|i| self.bytearray_ip_bits(xor_lut_idx, gf_2_8_mul_lut_idx, a[i], x))
+        std::array::from_fn(|i| self.bytearray_ip(xor_lut_idx, gf_2_8_mul_lut_idx, a[i], x))
     }
 
     /// returns a 0u8 in the shape of a ByteTarget.
@@ -142,17 +174,23 @@ pub trait CircuitBuilderAESState<F: RichField + Extendable<D>, const D: usize> {
 }
 
 impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
-    fn add_virtual_state(&mut self) -> StateTarget {
-        StateTarget(array::from_fn(|_| {
-            array::from_fn(|_| self.add_virtual_target())
-        }))
+    fn add_virtual_byte_target_unsafe(&mut self) -> ByteTarget {
+        ByteTarget(self.add_virtual_target())
+    }
+
+    fn assert_byte(&mut self, x: Target, u8_table_idx: usize) {
+        self.add_lookup_from_index(x, u8_table_idx);
+    }
+
+    fn byte_constant(&mut self, c: u8) -> ByteTarget {
+        ByteTarget(self.constant(F::from_canonical_u8(c)))
     }
 
     fn state_sub_word(&mut self, sbox_lut_idx: usize, word: [ByteTarget; 4]) -> [ByteTarget; 4] {
         array::from_fn(|i| {
             let byte_target = word[i];
 
-            self.add_lookup_from_index(byte_target, sbox_lut_idx)
+            ByteTarget(self.add_lookup_from_index(byte_target.0, sbox_lut_idx))
         })
     }
 
@@ -162,8 +200,7 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         sbox_lut_idx: usize,
         key: [ByteTarget; NK * NB],
     ) -> [[ByteTarget; 4]; 4 * (NR + 1)] {
-        let rcon: [ByteTarget; 11] =
-            array::from_fn(|i| self.constant(F::from_canonical_u8(RCON[i])));
+        let rcon: [ByteTarget; 11] = array::from_fn(|i| self.byte_constant(RCON[i]));
 
         let key: [[_; 4]; NK] = array::from_fn(|i| array::from_fn(|j| key[4 * i + j]));
 
@@ -199,23 +236,28 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
         })
     }
 
-    fn gf_2_8_add(&mut self, xor_lut_idx: usize, x: Target, y: Target) -> Target {
+    fn gf_2_8_add(&mut self, xor_lut_idx: usize, x: ByteTarget, y: ByteTarget) -> ByteTarget {
         byte_xor(self, xor_lut_idx, x, y)
     }
 
-    fn gf_2_8_mul(&mut self, gf_2_8_mul_lut_idx: usize, x: Target, y: Target) -> Target {
-        let lookup_idx = self.mul_const_add(F::from_canonical_u64(1 << 8), x, y);
-        self.add_lookup_from_index(lookup_idx, gf_2_8_mul_lut_idx)
+    fn gf_2_8_mul(
+        &mut self,
+        gf_2_8_mul_lut_idx: usize,
+        x: ByteTarget,
+        y: ByteTarget,
+    ) -> ByteTarget {
+        let lookup_idx = self.mul_const_add(F::from_canonical_u64(1 << 8), x.0, y.0);
+        ByteTarget(self.add_lookup_from_index(lookup_idx, gf_2_8_mul_lut_idx))
     }
 
-    fn bytearray_ip_bits<const N: usize>(
+    fn bytearray_ip<const N: usize>(
         &mut self,
         xor_lut_idx: usize,
         gf_2_8_mul_lut_idx: usize,
         x: [ByteTarget; N],
         y: [ByteTarget; N],
     ) -> ByteTarget {
-        let zero = self.zero();
+        let zero = ByteTarget(self.zero());
         std::iter::zip(x, y).fold(zero, |acc, (a, b)| {
             let prod = self.gf_2_8_mul(gf_2_8_mul_lut_idx, a, b);
             self.gf_2_8_add(xor_lut_idx, acc, prod)
@@ -223,7 +265,7 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
     }
 
     fn zero_byte(&mut self) -> ByteTarget {
-        self.zero()
+        ByteTarget(self.zero())
     }
 
     fn empty_state(&mut self) -> StateTarget {
@@ -233,23 +275,23 @@ impl CircuitBuilderAESState<F, D> for CircuitBuilder<F, D> {
 }
 
 pub trait PartialWitnessByteArray {
-    fn set_byte_array_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()>;
+    fn set_byte_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()>;
 }
 
 impl<F: Field> PartialWitnessByteArray for PartialWitness<F> {
-    fn set_byte_array_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()> {
-        self.set_target(target, F::from_canonical_u8(value))
+    fn set_byte_target(&mut self, target: ByteTarget, value: u8) -> anyhow::Result<()> {
+        self.set_target(target.0, F::from_canonical_u8(value))
     }
 }
 
 pub trait PartialWitnessAESState {
-    fn set_target_state(&mut self, target: StateTarget, value: State) -> anyhow::Result<()>;
+    fn set_state_target(&mut self, target: StateTarget, value: State) -> anyhow::Result<()>;
 }
 
 impl<F: Field> PartialWitnessAESState for PartialWitness<F> {
-    fn set_target_state(&mut self, target: StateTarget, value: State) -> anyhow::Result<()> {
+    fn set_state_target(&mut self, target: StateTarget, value: State) -> anyhow::Result<()> {
         std::iter::zip(target.0, value).try_for_each(|(t, v)| {
-            std::iter::zip(t, v).try_for_each(|(t, v)| self.set_byte_array_target(t, v))
+            std::iter::zip(t, v).try_for_each(|(t, v)| self.set_byte_target(t, v))
         })
     }
 }
@@ -292,10 +334,10 @@ pub fn gf_2_8_mul_lut(builder: &mut CircuitBuilder<F, D>) -> usize {
     builder.add_lookup_table_from_pairs(Arc::new(gf_2_8_mul_table))
 }
 
-pub fn state_mix_matrix_bits(builder: &mut CircuitBuilder<F, D>) -> [[ByteTarget; 4]; 4] {
-    let one = builder.one();
-    let two = builder.two();
-    let three = builder.constant(F::from_canonical_u64(3));
+pub fn state_mix_matrix(builder: &mut CircuitBuilder<F, D>) -> [[ByteTarget; 4]; 4] {
+    let one = builder.byte_constant(1);
+    let two = builder.byte_constant(2);
+    let three = builder.byte_constant(3);
 
     [
         [two, three, one, one],
@@ -311,8 +353,8 @@ pub fn byte_xor(
     x: ByteTarget,
     y: ByteTarget,
 ) -> ByteTarget {
-    let lookup_idx = builder.mul_const_add(F::from_canonical_u64(1 << 8), x, y);
-    builder.add_lookup_from_index(lookup_idx, xor_lut_idx)
+    let lookup_idx = builder.mul_const_add(F::from_canonical_u64(1 << 8), x.0, y.0);
+    ByteTarget(builder.add_lookup_from_index(lookup_idx, xor_lut_idx))
 }
 
 #[cfg(test)]
@@ -321,7 +363,10 @@ mod tests {
 
     use anyhow::Result;
     use plonky2::{
-        field::{goldilocks_field::GoldilocksField as F, types::Field},
+        field::{
+            goldilocks_field::GoldilocksField as F,
+            types::{Field, Field64},
+        },
         iop::witness::{PartialWitness, WitnessWrite},
         plonk::{
             circuit_builder::CircuitBuilder, circuit_data::CircuitConfig,
@@ -332,9 +377,38 @@ mod tests {
 
     use super::{
         ByteTarget, CircuitBuilderAESState, D, PartialWitnessAESState, PartialWitnessByteArray,
-        byte_xor_lut, gf_2_8_mul_lut, sbox_lut, state_mix_matrix_bits,
+        byte_xor_lut, gf_2_8_mul_lut, sbox_lut, state_mix_matrix,
     };
     use crate::native_aes::{State, encrypt_block, key_expansion, mix_columns, sub_bytes};
+
+    #[test]
+    fn test_assert_byte() -> Result<()> {
+        // Circuit declaration
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let u8_table_idx = sbox_lut(&mut builder);
+
+        let byte_target = builder.add_virtual_byte_target(u8_table_idx);
+
+        let data = builder.build::<PoseidonGoldilocksConfig>();
+
+        let mut rng = rand::rng();
+        let test_values: [u64; 10] = array::from_fn(|_| rng.random_range(0..F::ORDER));
+
+        test_values.into_iter().try_for_each(|tv| {
+            let mut pw = PartialWitness::<F>::new();
+            pw.set_target(byte_target.0, F::from_canonical_u64(tv))?;
+
+            if tv > u8::MAX as u64 {
+                assert!(data.prove(pw).is_err());
+                Ok(())
+            } else {
+                let proof = data.prove(pw)?;
+                data.verify(proof)
+            }
+        })
+    }
 
     #[test]
     fn test_sub_bytes() -> Result<()> {
@@ -342,7 +416,7 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let state_target = builder.add_virtual_state();
+        let state_target = builder.add_virtual_state_target_unsafe();
         let sbox_lut = sbox_lut(&mut builder);
         let out_state_target = builder.state_sub_bytes(sbox_lut, state_target);
 
@@ -356,8 +430,8 @@ mod tests {
             let expected_result = sub_bytes(s);
 
             let mut pw = PartialWitness::<F>::new();
-            pw.set_target_state(state_target, s)?;
-            pw.set_target_state(out_state_target, expected_result)?;
+            pw.set_state_target(state_target, s)?;
+            pw.set_state_target(out_state_target, expected_result)?;
 
             let proof = data.prove(pw)?;
             data.verify(proof)
@@ -372,8 +446,8 @@ mod tests {
 
         let xor_lut_idx = byte_xor_lut(&mut builder);
         let gf_2_8_mul_lut_idx = gf_2_8_mul_lut(&mut builder);
-        let state_target = builder.add_virtual_state();
-        let mix_matrix = state_mix_matrix_bits(&mut builder);
+        let state_target = builder.add_virtual_state_target_unsafe();
+        let mix_matrix = state_mix_matrix(&mut builder);
         let out_state_target =
             builder.state_mix_columns(xor_lut_idx, gf_2_8_mul_lut_idx, mix_matrix, state_target);
 
@@ -387,8 +461,8 @@ mod tests {
             let expected_result = mix_columns(s);
 
             let mut pw = PartialWitness::<F>::new();
-            pw.set_target_state(state_target, s)?;
-            pw.set_target_state(out_state_target, expected_result)?;
+            pw.set_state_target(state_target, s)?;
+            pw.set_state_target(out_state_target, expected_result)?;
 
             let proof = data.prove(pw)?;
             data.verify(proof)
@@ -403,8 +477,8 @@ mod tests {
 
         let gf_2_8_mul_lut_idx = gf_2_8_mul_lut(&mut builder);
 
-        let a = builder.add_virtual_target();
-        let b = builder.add_virtual_target();
+        let a = builder.add_virtual_byte_target_unsafe();
+        let b = builder.add_virtual_byte_target_unsafe();
 
         let a_times_b = builder.gf_2_8_mul(gf_2_8_mul_lut_idx, a, b);
 
@@ -424,18 +498,11 @@ mod tests {
         ];
         test_values
             .into_iter()
-            .map(|(a, b, c)| {
-                (
-                    F::from_canonical_u8(a),
-                    F::from_canonical_u8(b),
-                    F::from_canonical_u8(c),
-                )
-            })
             .try_for_each(|(a_val, b_val, expected_result)| {
                 let mut pw = PartialWitness::<F>::new();
-                pw.set_target(a, a_val)?;
-                pw.set_target(b, b_val)?;
-                pw.set_target(a_times_b, expected_result)?;
+                pw.set_byte_target(a, a_val)?;
+                pw.set_byte_target(b, b_val)?;
+                pw.set_byte_target(a_times_b, expected_result)?;
 
                 let proof = data.prove(pw)?;
                 data.verify(proof)
@@ -450,8 +517,8 @@ mod tests {
 
         let xor_lut_idx = byte_xor_lut(&mut builder);
 
-        let a = builder.add_virtual_target();
-        let b = builder.add_virtual_target();
+        let a = builder.add_virtual_byte_target_unsafe();
+        let b = builder.add_virtual_byte_target_unsafe();
 
         let a_plus_b = builder.gf_2_8_add(xor_lut_idx, a, b);
 
@@ -466,18 +533,11 @@ mod tests {
         });
         test_values
             .into_iter()
-            .map(|(a, b, c)| {
-                (
-                    F::from_canonical_u8(a),
-                    F::from_canonical_u8(b),
-                    F::from_canonical_u8(c),
-                )
-            })
             .try_for_each(|(a_val, b_val, expected_result)| {
                 let mut pw = PartialWitness::<F>::new();
-                pw.set_target(a, a_val)?;
-                pw.set_target(b, b_val)?;
-                pw.set_target(a_plus_b, expected_result)?;
+                pw.set_byte_target(a, a_val)?;
+                pw.set_byte_target(b, b_val)?;
+                pw.set_byte_target(a_plus_b, expected_result)?;
 
                 let proof = data.prove(pw)?;
                 data.verify(proof)
@@ -523,7 +583,8 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
+        let key_target: [ByteTarget; NK * NB] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
         let xor_lut_idx = byte_xor_lut(&mut builder);
         let sbox_lut_idx = sbox_lut(&mut builder);
         let expanded_key_target =
@@ -543,10 +604,10 @@ mod tests {
 
         let mut pw = PartialWitness::<F>::new();
 
-        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
         std::iter::zip(expanded_key_target, w).try_for_each(|(t, v)| {
-            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))
+            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_target(t, v))
         })?;
 
         let proof = data.prove(pw)?;
@@ -606,15 +667,16 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let key_target: [ByteTarget; NK * NB] = array::from_fn(|_| builder.add_virtual_target());
+        let key_target: [ByteTarget; NK * NB] =
+            array::from_fn(|_| builder.add_virtual_byte_target_unsafe());
         let xor_lut_idx = byte_xor_lut(&mut builder);
         let gf_2_8_mul_lut_idx = gf_2_8_mul_lut(&mut builder);
         let sbox_lut_idx = sbox_lut(&mut builder);
-        let mix_matrix = state_mix_matrix_bits(&mut builder);
+        let mix_matrix = state_mix_matrix(&mut builder);
         let expanded_key_target: [[ByteTarget; 4]; 4 * (NR + 1)] =
             builder.key_expansion::<NK, NB, NR>(xor_lut_idx, sbox_lut_idx, key_target);
 
-        let input_state_target = builder.add_virtual_state();
+        let input_state_target = builder.add_virtual_state_target(sbox_lut_idx);
 
         let output = builder.encrypt_block(
             xor_lut_idx,
@@ -647,16 +709,16 @@ mod tests {
 
         let mut pw = PartialWitness::<F>::new();
 
-        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))?;
+        std::iter::zip(key_target, key).try_for_each(|(t, v)| pw.set_byte_target(t, v))?;
 
-        pw.set_target_state(input_state_target, input_state_matrix)?;
+        pw.set_state_target(input_state_target, input_state_matrix)?;
 
         std::iter::zip(expanded_key_target, expanded_key).try_for_each(|(t, v)| {
-            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_array_target(t, v))
+            std::iter::zip(t, v).try_for_each(|(t, v)| pw.set_byte_target(t, v))
         })?;
 
         std::iter::zip(output.0, native_ciphertext).try_for_each(|(o, e)| {
-            std::iter::zip(o, e).try_for_each(|(o, e)| pw.set_byte_array_target(o, e))
+            std::iter::zip(o, e).try_for_each(|(o, e)| pw.set_byte_target(o, e))
         })?;
 
         let proof = data.prove(pw)?;
