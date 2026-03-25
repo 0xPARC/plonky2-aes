@@ -79,7 +79,7 @@ pub(crate) fn mix_columns(s: State) -> State {
 }
 
 /// multiplication in GF(2^8), section 4.2
-fn gf_2_8_mul(a_raw: u8, b_raw: u8) -> u8 {
+pub(crate) fn gf_2_8_mul(a_raw: u8, b_raw: u8) -> u8 {
     let mut r = 0u8;
     let mut a = a_raw;
     let mut b = b_raw;
